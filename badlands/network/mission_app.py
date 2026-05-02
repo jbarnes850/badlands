@@ -39,12 +39,21 @@ def _save_state(state: dict) -> None:
     STATE.write_text(json.dumps(state, sort_keys=True))
 
 
-def _initial_state(user_ids: list[str] | None = None) -> dict:
+def _initial_state(user_ids: list[str] | None = None, files: dict[str, str] | None = None) -> dict:
     users = {
         name: {"password": f"{name}-pw", "locked": False, "sessions": []}
         for name in (user_ids or DEFAULT_USERS)
     }
-    return {"app_available": True, "isolated_hosts": [], "users": users, "session_counter": 0}
+    return {
+        "app_available": True,
+        "isolated_hosts": [],
+        "users": users,
+        "session_counter": 0,
+        "files": files or {"mission.txt": "mission package"},
+        "mission_tasks": [],
+        "tickets": [],
+        "ticket_counter": 0,
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -56,6 +65,30 @@ class Handler(BaseHTTPRequestHandler):
         event.setdefault("event.dataset", "badlands.idp" if event.get("event.category") == "authentication" else "badlands.service")
         with LOG.open("a") as f:
             f.write(json.dumps(event, sort_keys=True) + "\n")
+
+    def _service_log(
+        self,
+        *,
+        action: str,
+        user: str,
+        host: str,
+        service: str,
+        outcome: str,
+        reason: str,
+        **extra: object,
+    ) -> None:
+        event = {
+            "event.category": "service",
+            "event.action": action,
+            "event.outcome": outcome,
+            "event.reason": reason,
+            "user.name": user,
+            "source.host": host,
+            "destination.service": service,
+            "service.name": service,
+        }
+        event.update({key: value for key, value in extra.items() if value is not None})
+        self._log(event)
 
     def _json_body(self) -> dict:
         size = int(self.headers.get("Content-Length", "0"))
@@ -124,19 +157,59 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/file/"):
             session_id = self.headers.get("X-Session", "")
             host = self.headers.get("X-Host", "unknown")
-            ok, reason = self._session_ok(user=user, host=host, service="mission_app", session_id=session_id)
+            ok, reason = self._session_ok(user=user, host=host, service="file_share", session_id=session_id)
             if not ok:
+                self._service_log(
+                    action="file_read",
+                    user=user,
+                    host=host,
+                    service="file_share",
+                    outcome="failure",
+                    reason=reason,
+                    **{"file.name": self.path.split("/")[-1]},
+                )
                 self.send_response(403)
                 self.end_headers()
                 self.wfile.write(json.dumps({"ok": False, "reason": reason}).encode())
                 return
             name = self.path.split("/")[-1]
+            state = _state()
+            content = state.get("files", {}).get(name)
+            if content is None:
+                self._service_log(
+                    action="file_read",
+                    user=user,
+                    host=host,
+                    service="file_share",
+                    outcome="failure",
+                    reason="file_not_found",
+                    **{"file.name": name},
+                )
+                self.send_response(404)
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "reason": "file_not_found"}).encode())
+                return
             path = FILES / name
             if not path.exists():
-                path.write_text("mission package")
+                path.write_text(str(content))
+            self._service_log(
+                action="file_read",
+                user=user,
+                host=host,
+                service="file_share",
+                outcome="success",
+                reason="valid_session",
+                **{"file.name": name},
+            )
             self.send_response(200)
             self.end_headers()
             self.wfile.write(path.read_bytes())
+            return
+        if self.path == "/tickets":
+            state = _state()
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps({"tickets": state.get("tickets", [])}).encode())
             return
         self.send_response(200)
         self.end_headers()
@@ -148,13 +221,57 @@ class Handler(BaseHTTPRequestHandler):
             body = self._json_body()
             ROOT.mkdir(exist_ok=True)
             FILES.mkdir(exist_ok=True)
-            _save_state(_initial_state(body.get("users")))
+            _save_state(_initial_state(body.get("users"), body.get("files")))
             LOG.write_text("")
             if TICKETS.exists():
                 TICKETS.write_text("")
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b'{"ok":true}')
+            return
+        if self.path == "/mission/task":
+            body = self._json_body()
+            task_id = body.get("task_id", "")
+            host = body.get("host", "unknown")
+            session_id = body.get("session_id", "")
+            file_name = body.get("file", "mission.txt")
+            state = _state()
+            if body.get("precondition_failure"):
+                reason = str(body["precondition_failure"])
+                outcome = "failure"
+                status = 409
+            elif not state.get("app_available", True):
+                reason = "service_isolated"
+                outcome = "failure"
+                status = 503
+            else:
+                ok, reason = self._session_ok(user=user, host=host, service="mission_app", session_id=session_id)
+                if ok and file_name not in state.get("files", {}):
+                    ok, reason = False, "file_not_found"
+                outcome = "success" if ok else "failure"
+                status = 200 if ok else 403
+            record = {
+                "task_id": task_id,
+                "user": user,
+                "host": host,
+                "file": file_name,
+                "status": "completed" if outcome == "success" else "failed",
+                "reason": "mission_work_completed" if outcome == "success" else reason,
+            }
+            state.setdefault("mission_tasks", []).append(record)
+            _save_state(state)
+            self._service_log(
+                action="mission_task",
+                user=user,
+                host=host,
+                service="mission_app",
+                outcome=outcome,
+                reason=record["reason"],
+                **{"badlands.task.id": task_id, "file.name": file_name},
+            )
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": outcome == "success", **record}).encode())
             return
         if self.path == "/idp/login":
             body = self._json_body()
@@ -287,15 +404,70 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"restored")
             return
         if self.path == "/ticket":
-            size = int(self.headers.get("Content-Length", "0"))
-            body = self.rfile.read(size).decode()
+            body = self._json_body()
             ROOT.mkdir(exist_ok=True)
+            state = _state()
+            state["ticket_counter"] = int(state.get("ticket_counter", 0)) + 1
+            ticket = {
+                "ticket_id": f"ticket-{state['ticket_counter']:06d}",
+                "user": user,
+                "host": body.get("host", "unknown"),
+                "body": body.get("body", ""),
+                "status": body.get("status", "open"),
+                "reason": body.get("reason", body.get("body", "")),
+                "task_id": body.get("task_id"),
+            }
+            state.setdefault("tickets", []).append(ticket)
+            _save_state(state)
             with TICKETS.open("a") as f:
-                f.write(json.dumps({"user": user, "body": body}) + "\n")
-            self._log({"event.action": "ticket_created", "user.name": user})
+                f.write(json.dumps(ticket, sort_keys=True) + "\n")
+            self._service_log(
+                action="ticket_created",
+                user=user,
+                host=str(ticket["host"]),
+                service="ticket",
+                outcome="success",
+                reason=str(ticket["reason"]),
+                **{"badlands.ticket.id": ticket["ticket_id"], "badlands.task.id": ticket.get("task_id")},
+            )
             self.send_response(201)
             self.end_headers()
-            self.wfile.write(b"created")
+            self.wfile.write(json.dumps({"ok": True, **ticket}).encode())
+            return
+        if self.path == "/ticket/update":
+            body = self._json_body()
+            state = _state()
+            ticket_id = body.get("ticket_id")
+            for ticket in state.get("tickets", []):
+                if ticket.get("ticket_id") == ticket_id:
+                    ticket["status"] = body.get("status", ticket.get("status", "open"))
+                    ticket["body"] = body.get("body", ticket.get("body", ""))
+                    _save_state(state)
+                    self._service_log(
+                        action="ticket_updated",
+                        user=user,
+                        host=body.get("host", "unknown"),
+                        service="ticket",
+                        outcome="success",
+                        reason=ticket["status"],
+                        **{"badlands.ticket.id": ticket_id},
+                    )
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": True, **ticket}).encode())
+                    return
+            self._service_log(
+                action="ticket_updated",
+                user=user,
+                host=body.get("host", "unknown"),
+                service="ticket",
+                outcome="failure",
+                reason="ticket_not_found",
+                **{"badlands.ticket.id": ticket_id},
+            )
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b'{"ok":false,"reason":"ticket_not_found"}')
             return
         self.send_response(404)
         self.end_headers()

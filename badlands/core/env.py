@@ -90,8 +90,18 @@ class MissionDeskEnv:
             )
             self._local_service_thread.start()
             self.service_url = f"http://127.0.0.1:{self._local_service.server_port}"
-        self._service_post("/admin/reset_state", {"users": sorted(self.scenario.user_ids)}, user="system")
+        self._service_post(
+            "/admin/reset_state",
+            {"users": sorted(self.scenario.user_ids), "files": self._scenario_files()},
+            user="system",
+        )
         self.ingest_service_logs()
+
+    def _scenario_files(self) -> dict[str, str]:
+        files: dict[str, str] = {}
+        for host in self.scenario.hosts:
+            files.update({str(name): str(content) for name, content in host.get("files", {}).items()})
+        return files
 
     def schedule(self, delay: int, fn: Callable) -> None:
         self.seq += 1
@@ -175,7 +185,7 @@ class MissionDeskEnv:
             green_observation = {
                 "user": {"user_id": user, "host_id": host, "role": "mission_analyst"},
                 "workflow": {"task_id": f"task-{i}", "history": self.state.tickets[-5:], "mission_completed": self.state.mission_completed, "mission_failed": self.state.mission_failed},
-                "mission": [{"task_id": f"task-{i}", "app_available": not self.state.hosts[mission_host].isolated}],
+                "mission": [{"task_id": f"task-{i}", "requested_action": "use_mission_app"}],
             }
             try:
                 decision = self.user_simulator.decide(green_observation)
@@ -183,42 +193,76 @@ class MissionDeskEnv:
                 decision_action = decision.action
             except InvalidLLMDecision as exc:
                 self._emit_invalid_llm("green", exc, green_observation)
-                self._fail_green_task(i, user, "invalid_green_decision", [])
+                self._fail_green_task(i, user, host, "invalid_green_decision", [])
                 return
         if decision_action == "create_ticket":
-            self._fail_green_task(i, user, "green_created_ticket", [])
+            self._fail_green_task(i, user, host, "green_created_ticket", [])
             return
         if self.state.hosts[host].isolated or self.state.hosts[mission_host].isolated:
-            self._fail_green_task(i, user, "defensive_or_service_disruption", [])
+            self._fail_green_task(i, user, host, "defensive_or_service_disruption", [])
             return
         login = self._idp_login(user, host)
         evidence = login["events"]
         if not login["ok"]:
-            self._fail_green_task(i, user, login["reason"], evidence)
+            self._fail_green_task(i, user, host, login["reason"], evidence)
             return
         session_id = login["session_id"]
         validate = self._idp_validate(user, host, session_id, mission_service)
         evidence.extend(validate["events"])
         if not validate["ok"]:
-            self._fail_green_task(i, user, validate["reason"], evidence)
+            self._fail_green_task(i, user, host, validate["reason"], evidence)
             return
-        status = self._service_get(f"/file/{mission_file}", user=user, host=host, session_id=session_id)
+        file_status = self._service_get(f"/file/{mission_file}", user=user, host=host, session_id=session_id)
         evidence.extend(self.ingest_service_logs())
-        if status >= 400:
-            self._fail_green_task(i, user, "mission_app_auth_failed", evidence)
+        status, body, mission_events = self._mission_task(
+            task_id=f"task-{i}",
+            user=user,
+            host=host,
+            session_id=session_id,
+            mission_file=mission_file,
+        )
+        evidence.extend(mission_events)
+        if file_status >= 400 or status >= 400 or not body.get("ok"):
+            self._fail_green_task(i, user, host, body.get("reason", "mission_app_auth_failed"), evidence)
             return
         self.state.mission_completed += 1
         self.trace.emit(
             "mission_task_event",
             self.now,
-            {"task_id": f"task-{i}", "user": user, "status": "completed", "dependency": mission_service, "source_event_ids": evidence},
+            {
+                "task_id": f"task-{i}",
+                "user": user,
+                "status": "completed",
+                "dependency": mission_service,
+                "source_event_ids": evidence,
+                "service_authority": "mission_app",
+            },
             agent="green",
             parents=evidence,
         )
 
-    def _fail_green_task(self, i: int, user: str, reason: str, evidence: list[str]) -> None:
-        payload = {"task_id": f"task-{i}", "user": user, "status": "failed", "reason": reason, "ticket": True, "source_event_ids": evidence}
-        self.state.tickets.append({"time": self.now, "user": user, "reason": reason})
+    def _fail_green_task(self, i: int, user: str, host: str, reason: str, evidence: list[str]) -> None:
+        task_id = f"task-{i}"
+        status, _, mission_events = self._mission_task(
+            task_id=task_id,
+            user=user,
+            host=host,
+            session_id=self.idp_sessions.get(user, ""),
+            mission_file=self.scenario.attacker["collection_target"],
+            precondition_failure=reason,
+        )
+        evidence = [*evidence, *mission_events]
+        ticket = self._create_ticket(user=user, host=host, task_id=task_id, reason=reason)
+        evidence.extend(ticket["events"])
+        payload = {
+            "task_id": task_id,
+            "user": user,
+            "status": "failed",
+            "reason": reason if status >= 400 else "mission_failed",
+            "ticket": bool(ticket["ok"]),
+            "source_event_ids": evidence,
+            "service_authority": "mission_app",
+        }
         self.state.mission_failed += 1
         self.trace.emit("mission_task_event", self.now, payload, agent="green", parents=evidence)
         if reason in {"account_locked", "mission_app_auth_failed", "invalid_session"}:
@@ -229,7 +273,30 @@ class MissionDeskEnv:
                 agent="green",
                 parents=evidence,
             )
-        self._service_post("/ticket", {"body": reason}, user=user)
+
+    def _mission_task(
+        self,
+        *,
+        task_id: str,
+        user: str,
+        host: str,
+        session_id: str,
+        mission_file: str,
+        precondition_failure: str | None = None,
+    ) -> tuple[int, dict[str, Any], list[str]]:
+        payload = {"task_id": task_id, "host": host, "session_id": session_id, "file": mission_file}
+        if precondition_failure:
+            payload["precondition_failure"] = precondition_failure
+        status, body, events = self._service_post_with_events("/mission/task", payload, user=user)
+        return status, body, events
+
+    def _create_ticket(self, *, user: str, host: str, task_id: str, reason: str) -> dict[str, Any]:
+        status, body, events = self._service_post_with_events(
+            "/ticket",
+            {"host": host, "task_id": task_id, "body": reason, "reason": reason},
+            user=user,
+        )
+        return {"ok": status == 201 and body.get("ok"), "ticket": body, "events": events}
 
     def _idp_login(self, user: str, host: str) -> dict[str, Any]:
         status, body, events = self._idp_post(
@@ -270,6 +337,9 @@ class MissionDeskEnv:
         return {"ok": status == 200 and body.get("ok"), "reason": body.get("reason", "unknown_user"), "events": events}
 
     def _idp_post(self, path: str, data: dict, *, user: str) -> tuple[int, dict[str, Any], list[str]]:
+        return self._service_post_with_events(path, data, user=user)
+
+    def _service_post_with_events(self, path: str, data: dict, *, user: str) -> tuple[int, dict[str, Any], list[str]]:
         status, body = self._service_post_json(path, data, user=user)
         return status, body, self.ingest_service_logs()
 
@@ -331,6 +401,16 @@ class MissionDeskEnv:
                 user = event.get("user.name")
                 if user in self.state.users:
                     self.state.users[user].locked = False
+            if event.get("event.action") == "ticket_created" and event.get("event.outcome") == "success":
+                self.state.tickets.append(
+                    {
+                        "time": self.now,
+                        "ticket_id": event.get("badlands.ticket.id"),
+                        "user": event.get("user.name"),
+                        "reason": event.get("event.reason"),
+                        "source_event_id": eid,
+                    }
+                )
         return emitted
 
     # Attacker actions

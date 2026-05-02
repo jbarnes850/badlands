@@ -37,6 +37,19 @@ def defender_view(events: list[dict]) -> dict:
             obs["alerts"].append(p)
         elif e["type"] == "telemetry_emitted":
             obs["telemetry"].append(p)
+            ecs = p.get("ecs", {})
+            if ecs.get("event.action") in {"ticket_created", "ticket_updated"}:
+                obs["tickets"].append(
+                    {
+                        "event_id": e["event_id"],
+                        "ticket_id": ecs.get("badlands.ticket.id"),
+                        "user": ecs.get("user.name"),
+                        "status": ecs.get("event.outcome"),
+                        "reason": ecs.get("event.reason"),
+                        "task_id": ecs.get("badlands.task.id"),
+                        "source_event_ids": [e["event_id"]],
+                    }
+                )
         elif e["type"] == "mission_task_event" and p.get("ticket"):
             obs["tickets"].append(p)
         elif e["type"] == "action_completed" and e.get("agent") == "defender":
