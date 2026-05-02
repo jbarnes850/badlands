@@ -80,3 +80,29 @@ def test_scenario_fixture_truth_does_not_leak_to_observations(tmp_path: Path):
     assert "provenance" not in text
     assert "validation_plan" not in text
     assert "initial_compromised_hosts" not in text
+
+
+def test_scenario_validates_dependency_references(tmp_path: Path):
+    bad_service = _scenario_copy(
+        tmp_path,
+        services=[
+            {"service_id": "mission_app", "host_id": "app-1", "kind": "web_app", "criticality": 5, "depends_on": ["missing_service"]},
+            {"service_id": "idp", "host_id": "idp-1", "kind": "identity", "criticality": 5},
+            {"service_id": "file_share", "host_id": "files-1", "kind": "file_share", "criticality": 5},
+            {"service_id": "ticket", "host_id": "app-1", "kind": "ticket_surface", "criticality": 3},
+        ],
+    )
+    try:
+        load_scenario(bad_service)
+    except ValueError as exc:
+        assert "depends_on unknown service" in str(exc)
+    else:
+        raise AssertionError("invalid service dependency was accepted")
+
+    bad_mission = _scenario_copy(tmp_path, **{"mission.dependencies": {"use_mission_app": ["missing_host"]}})
+    try:
+        load_scenario(bad_mission)
+    except ValueError as exc:
+        assert "references unknown host/service" in str(exc)
+    else:
+        raise AssertionError("invalid mission dependency was accepted")

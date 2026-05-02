@@ -15,7 +15,7 @@ The current schema is intentionally small:
 - `attacker`: initial host, initial credentials, initially compromised hosts, credential target, lateral target, and collection target.
 - `provenance`: per-field realism anchors with `field`, `taxonomy`, `source`, optional `url`, and `validation_plan`.
 
-The loader validates uniqueness, host/user/service references, task cadence, attacker references, auth-affinity consistency, and provenance completeness. Python may orchestrate execution, but the default world inventory, users, task cadence, criticality, auth-affinity reference, and attacker starting assumptions come from the fixture.
+The loader validates uniqueness, host/user/service references, `services[].depends_on`, `mission.dependencies`, task cadence, attacker references, auth-affinity consistency, and provenance completeness. Python may orchestrate execution, but the default world inventory, users, task cadence, criticality, auth-affinity reference, and attacker starting assumptions come from the fixture.
 
 ## Taxonomy Mapping
 

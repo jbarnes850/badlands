@@ -35,6 +35,20 @@ class Scenario:
         return {str(user["user_id"]) for user in self.users}
 
     @property
+    def service_ids(self) -> set[str]:
+        return {str(service["service_id"]) for service in self.services}
+
+    def service_host(self, service_id: str) -> str:
+        for service in self.services:
+            if service["service_id"] == service_id:
+                return str(service["host_id"])
+        raise KeyError(f"unknown scenario service {service_id}")
+
+    @property
+    def mission_service_id(self) -> str:
+        return str(self.mission.get("task_template", "use_mission_app")).replace("use_", "")
+
+    @property
     def auth_affinity_path(self) -> Path:
         path = Path(self.auth_affinity_dataset)
         return path if path.is_absolute() else Path(__file__).parents[2] / path
@@ -73,12 +87,22 @@ def validate_scenario(scenario: Scenario) -> None:
 
     host_ids = scenario.host_ids
     user_ids = scenario.user_ids
+    service_ids = scenario.service_ids
     for user in scenario.users:
         if user["primary_host"] not in host_ids:
             raise ValueError(f"user {user['user_id']} references unknown primary_host {user['primary_host']}")
     for service in scenario.services:
         if service["host_id"] not in host_ids:
             raise ValueError(f"service {service['service_id']} references unknown host_id {service['host_id']}")
+        for dependency in service.get("depends_on", []):
+            if dependency not in service_ids:
+                raise ValueError(f"service {service['service_id']} depends_on unknown service {dependency}")
+    for task, dependencies in scenario.mission.get("dependencies", {}).items():
+        if not isinstance(dependencies, list):
+            raise ValueError(f"mission dependency {task} must be a list")
+        for dependency in dependencies:
+            if dependency not in host_ids and dependency not in service_ids:
+                raise ValueError(f"mission dependency {task} references unknown host/service {dependency}")
 
     attacker = scenario.attacker
     if attacker["initial_host"] not in host_ids:

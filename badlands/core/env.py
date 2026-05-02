@@ -163,6 +163,9 @@ class MissionDeskEnv:
         )
 
     def green_task(self, i: int) -> None:
+        mission_service = self.scenario.mission_service_id
+        mission_host = self.scenario.service_host(mission_service)
+        mission_file = self.scenario.attacker["collection_target"]
         users = list(self.state.users)
         weights = [self.state.auth_affinities[u].logons for u in users]
         user = self.rng.choices(users, weights=weights, k=1)[0]
@@ -172,7 +175,7 @@ class MissionDeskEnv:
             green_observation = {
                 "user": {"user_id": user, "host_id": host, "role": "mission_analyst"},
                 "workflow": {"task_id": f"task-{i}", "history": self.state.tickets[-5:], "mission_completed": self.state.mission_completed, "mission_failed": self.state.mission_failed},
-                "mission": [{"task_id": f"task-{i}", "app_available": not self.state.hosts["app-1"].isolated}],
+                "mission": [{"task_id": f"task-{i}", "app_available": not self.state.hosts[mission_host].isolated}],
             }
             try:
                 decision = self.user_simulator.decide(green_observation)
@@ -185,7 +188,7 @@ class MissionDeskEnv:
         if decision_action == "create_ticket":
             self._fail_green_task(i, user, "green_created_ticket", [])
             return
-        if self.state.hosts[host].isolated or self.state.hosts["app-1"].isolated:
+        if self.state.hosts[host].isolated or self.state.hosts[mission_host].isolated:
             self._fail_green_task(i, user, "defensive_or_service_disruption", [])
             return
         login = self._idp_login(user, host)
@@ -194,12 +197,12 @@ class MissionDeskEnv:
             self._fail_green_task(i, user, login["reason"], evidence)
             return
         session_id = login["session_id"]
-        validate = self._idp_validate(user, host, session_id, "mission_app")
+        validate = self._idp_validate(user, host, session_id, mission_service)
         evidence.extend(validate["events"])
         if not validate["ok"]:
             self._fail_green_task(i, user, validate["reason"], evidence)
             return
-        status = self._service_get("/file/mission.txt", user=user, host=host, session_id=session_id)
+        status = self._service_get(f"/file/{mission_file}", user=user, host=host, session_id=session_id)
         evidence.extend(self.ingest_service_logs())
         if status >= 400:
             self._fail_green_task(i, user, "mission_app_auth_failed", evidence)
@@ -208,7 +211,7 @@ class MissionDeskEnv:
         self.trace.emit(
             "mission_task_event",
             self.now,
-            {"task_id": f"task-{i}", "user": user, "status": "completed", "dependency": "mission_app", "source_event_ids": evidence},
+            {"task_id": f"task-{i}", "user": user, "status": "completed", "dependency": mission_service, "source_event_ids": evidence},
             agent="green",
             parents=evidence,
         )
@@ -351,12 +354,14 @@ class MissionDeskEnv:
             return
         if action == "discover_local":
             self.telemetry("process", {"process.name": "whoami", "host.name": self.state.attacker_host}, parents=[parent])
-            out["stdout"] = "alice ws-alice files-1 app-1"
+            visible = [self.scenario.attacker["initial_credentials"][0], self.state.attacker_host, *self._service_hosts()]
+            out["stdout"] = " ".join(dict.fromkeys(visible))
         elif action == "scan_network":
             self._service_get("/health", user="attacker")
             self.ingest_service_logs()
-            self.telemetry("network", {"source.host": self.state.attacker_host, "destination.host": "app-1", "event.action": "connection_attempt"}, parents=[parent])
-            out["stdout"] = "files-1:445 app-1:8080 idp-1:8081"
+            mission_host = self.scenario.service_host(self.scenario.mission_service_id)
+            self.telemetry("network", {"source.host": self.state.attacker_host, "destination.host": mission_host, "event.action": "connection_attempt"}, parents=[parent])
+            out["stdout"] = " ".join(f"{host}:{port}" for host, port in self._service_banners())
         elif action == "attempt_credential_access":
             credential_user = self.scenario.attacker["credential_target_user"]
             lateral_host = self.scenario.attacker["lateral_target_host"]
@@ -394,6 +399,16 @@ class MissionDeskEnv:
             self.telemetry("file", {"file.path": f"/share/{target}", "event.action": "read"}, parents=[parent])
         self.trace.emit("action_completed", self.now, {"action": action, "success": "stderr" not in out, "attacker_output": out, "duration": 1}, agent="attacker", parents=[parent])
 
+    def _service_hosts(self) -> list[str]:
+        return [str(service["host_id"]) for service in self.scenario.services]
+
+    def _service_banners(self) -> list[tuple[str, str]]:
+        ports = {"file_share": "445", "web_app": "8080", "identity": "8081", "ticket_surface": "8080"}
+        return [
+            (str(service["host_id"]), ports.get(str(service.get("kind")), "8080"))
+            for service in self.scenario.services
+        ]
+
     # Defender actions
     def defender(self, action: str, params: dict | None = None, *, decision_event_id: str | None = None) -> None:
         params = params or {}
@@ -412,24 +427,24 @@ class MissionDeskEnv:
         if action == "triage_alert":
             payload["case_note"] = "linked source telemetry reviewed"
         elif action == "query_endpoint":
-            host = params.get("host_id", "ws-alice")
+            host = params.get("host_id", self.scenario.attacker["initial_host"])
             payload["events"] = [t for t in self.state.telemetry if t["ecs"].get("host.name") == host][:5]
         elif action == "query_identity":
             payload["auth_events"] = [t for t in self.state.telemetry if t["category"] == "auth"][-5:]
         elif action == "isolate_host":
-            host = params.get("host_id", "ws-alice")
+            host = params.get("host_id", self.scenario.attacker["initial_host"])
             self.state.hosts[host].isolated = True
             payload["host_id"] = host
             payload["outcome"] = "host network access policy updated"
             audit_true_positive = self.state.hosts[host].compromised or self.state.hosts[host].persistence
             self.trace.emit("state_transition", self.now, {"kind": "defender_action_assessment", "action": action, "target": host, "audit_true_positive": audit_true_positive}, parents=[parent])
-            if self.service_url and host == "app-1":
+            if self.service_url and host == self.scenario.service_host(self.scenario.mission_service_id):
                 self._service_post("/admin/isolate_app", {}, user="defender")
                 self.ingest_service_logs()
             if not audit_true_positive or self.state.hosts[host].criticality >= 5:
                 self.trace.emit("defense_harm_event", self.now, {"field": "host_isolation_minutes", "minutes": 10, "host_id": host, "reason": "isolation_blast_radius"}, agent="defender", parents=[parent])
         elif action == "reset_account":
-            user = params.get("user_id", "alice")
+            user = params.get("user_id", self.scenario.attacker["initial_credentials"][0])
             reset = self._idp_reset(user)
             payload["success"] = reset["ok"]
             payload["user_id"] = user
@@ -440,7 +455,7 @@ class MissionDeskEnv:
             if not audit_true_positive:
                 self.trace.emit("defense_harm_event", self.now, {"field": "user_lockout_minutes", "minutes": 10, "user": user, "reason": "reset_user_ticket", "source_event_ids": reset["events"]}, agent="defender", parents=[parent, *reset["events"]])
         elif action == "rollback":
-            target = params.get("target", "ws-alice")
+            target = params.get("target", self.scenario.attacker["initial_host"])
             if target in self.state.hosts:
                 self.state.hosts[target].isolated = False
             if target in self.state.users:
