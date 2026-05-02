@@ -128,5 +128,6 @@ def test_green_llm_observation_does_not_include_account_locked_truth(tmp_path: P
     env.green_task(0)
     assert actor.observation is not None
     assert "account_locked" not in str(actor.observation)
+    assert "app_available" not in str(actor.observation)
     events = load_trace(tmp_path / "green.jsonl")
     assert any(e["type"] == "llm_decision" and e["agent"] == "green" for e in events)

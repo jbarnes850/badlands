@@ -10,6 +10,7 @@ import badlands.network.mission_app as app
 from badlands.cli import run_episode
 from badlands.core.datasets import AuthAffinity
 from badlands.core.env import MissionDeskEnv
+from badlands.core.observations import defender_view
 from badlands.core.state import User
 from badlands.core.trace import load_trace
 from badlands.scoring.replay import derive_scores
@@ -149,3 +150,83 @@ def test_identity_realism_changes_measured_security_risk(tmp_path):
 
     assert valid_score["lateral_movement_count"] > invalidated_score["lateral_movement_count"]
     assert valid_score["overall_security_score"] < invalidated_score["overall_security_score"]
+
+
+def test_green_mission_success_is_backed_by_service_logs(tmp_path):
+    env = MissionDeskEnv(tmp_path / "mission-service.jsonl", seed=1, no_green=True)
+    env.state.users = {"alice": User("alice", "ws-alice")}
+    env.state.auth_affinities = {"alice": AuthAffinity("alice", "ws-alice", 1, ("idp-1",))}
+    env.green_task(0)
+    env.run(1)
+
+    events = load_trace(tmp_path / "mission-service.jsonl")
+    completed = [e for e in events if e["type"] == "mission_task_event" and e["payload"].get("status") == "completed"]
+    assert completed
+    evidence_ids = set(completed[-1]["payload"]["source_event_ids"])
+    evidence = [e for e in events if e["event_id"] in evidence_ids]
+    service_actions = {
+        e["payload"]["ecs"].get("event.action")
+        for e in evidence
+        if e["type"] == "telemetry_emitted" and e["payload"].get("category") == "service"
+    }
+    assert {"file_read", "mission_task"} <= service_actions
+    assert completed[-1]["parents"] == completed[-1]["payload"]["source_event_ids"]
+
+
+def test_file_access_requires_valid_idp_session(tmp_path):
+    env = MissionDeskEnv(tmp_path / "file-session.jsonl", seed=1, no_green=True)
+    assert env._service_get("/file/mission.txt", user="alice", host="ws-alice") == 403
+
+    login = env._idp_login("alice", "ws-alice")
+    assert login["ok"]
+    assert env._service_get("/file/mission.txt", user="alice", host="ws-alice", session_id=login["session_id"]) == 200
+
+    env.defender("reset_account", {"user_id": "alice"})
+    env.run(5)
+    assert env._service_get("/file/mission.txt", user="alice", host="ws-alice", session_id=login["session_id"]) == 403
+    env.ingest_service_logs()
+    auth = [
+        e["payload"]["ecs"]
+        for e in load_trace(tmp_path / "file-session.jsonl")
+        if e["type"] == "telemetry_emitted" and e["payload"].get("category") == "auth"
+    ]
+    assert any(a["event.action"] == "session_validate" and a["event.reason"] == "invalid_session" for a in auth)
+    assert any(a["event.action"] == "session_validate" and a["event.reason"] == "account_locked" for a in auth)
+
+
+def test_ticket_creation_is_service_backed_and_defender_visible(tmp_path):
+    env = MissionDeskEnv(tmp_path / "ticket-service.jsonl", seed=1, no_green=True)
+    ticket = env._create_ticket(user="alice", host="ws-alice", task_id="task-99", reason="app confusing failure")
+    assert ticket["ok"]
+
+    events = load_trace(tmp_path / "ticket-service.jsonl")
+    service_ticket = [
+        e
+        for e in events
+        if e["type"] == "telemetry_emitted"
+        and e["payload"].get("category") == "service"
+        and e["payload"]["ecs"].get("event.action") == "ticket_created"
+    ]
+    assert service_ticket
+    obs = defender_view(events)
+    assert any(t.get("ticket_id") == ticket["ticket"]["ticket_id"] for t in obs["tickets"])
+    assert "credentials_exposed" not in str(obs)
+
+
+def test_mission_failure_requires_service_derived_evidence(tmp_path):
+    env = MissionDeskEnv(tmp_path / "mission-failure-evidence.jsonl", seed=1, no_green=True)
+    env.state.users = {"alice": User("alice", "ws-alice")}
+    env.state.auth_affinities = {"alice": AuthAffinity("alice", "ws-alice", 1, ("idp-1",))}
+    env.state.hosts[env.scenario.service_host(env.scenario.mission_service_id)].isolated = True
+    env.green_task(0)
+    env.run(1)
+
+    events = load_trace(tmp_path / "mission-failure-evidence.jsonl")
+    failed = [e for e in events if e["type"] == "mission_task_event" and e["payload"].get("status") == "failed"]
+    assert failed
+    evidence = [e for e in events if e["event_id"] in set(failed[-1]["payload"]["source_event_ids"])]
+    assert any(
+        e["payload"].get("category") == "service"
+        and e["payload"]["ecs"].get("event.action") in {"mission_task", "ticket_created"}
+        for e in evidence
+    )
