@@ -1,0 +1,13 @@
+user_id,primary_host,logons,anomalous_hosts
+alice,ws-alice,42,ws-bob;files-1
+bob,ws-bob,37,ws-alice;files-1
+carol,ws-carol,31,ws-alice;files-1
+dave,ws-dave,28,ws-bob;app-1
+erin,ws-erin,24,ws-alice;files-1
+frank,ws-frank,20,ws-bob;idp-1
+grace,ws-grace,18,ws-alice;app-1
+heidi,ws-heidi,16,ws-bob;files-1
+ivan,ws-ivan,14,ws-alice;idp-1
+judy,ws-judy,12,ws-bob;app-1
+mallory,ws-mallory,6,ws-alice;files-1
+oscar,ws-oscar,5,ws-bob;idp-1

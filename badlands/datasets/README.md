@@ -1,0 +1,3 @@
+# Dataset fixtures
+
+`lanl_auth_affinity_sample.csv` is a small derived fixture shaped from the public LANL cyber dataset family (`https://csr.lanl.gov/data/`), specifically the user-computer authentication-association use case. It is not a copy of sensitive records; it preserves only the fields Badlands needs for the vertical slice: user id, primary host affinity, approximate relative logon count, and plausible anomalous hosts. Use: initialize green user-host affinities and non-uniform authentication background events. Next validation step is replacing this tiny fixture with a scripted transform from the LANL public auth association release.
