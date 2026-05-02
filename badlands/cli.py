@@ -107,6 +107,7 @@ def run_episode(args: argparse.Namespace) -> dict:
         magic_observations=args.magic_observations,
         service_url=args.service_url,
         user_simulator=user_sim,
+        scenario=getattr(args, "scenario", None),
     )
     if args.attacker_actor == "llm":
         schedule_llm_attacker(env, AttackerLLM(cache_dir=args.llm_cache, seed=args.seed))
@@ -134,6 +135,7 @@ def main() -> None:
     ap.add_argument("--no-green", action="store_true")
     ap.add_argument("--magic-observations", action="store_true")
     ap.add_argument("--service-url")
+    ap.add_argument("--scenario", type=Path)
     ap.add_argument("--llm-cache", type=Path, default=Path("tests/fixtures/llm_cache"))
     ap.add_argument("--green-actor", choices=["scripted", "llm"], default="scripted")
     ap.add_argument("--attacker-actor", choices=["scripted", "llm"], default="scripted")

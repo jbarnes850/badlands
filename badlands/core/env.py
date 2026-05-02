@@ -15,6 +15,7 @@ from typing import Any, Callable
 import badlands.network.mission_app as mission_app
 from badlands.agents.llm import InvalidLLMDecision, LLMDecision
 from badlands.core.observations import defender_view
+from badlands.core.scenario import Scenario
 from badlands.core.state import WorldState, initial_state
 from badlands.core.trace import TraceWriter
 from badlands.scoring.replay import derive_scores_with_evidence
@@ -28,13 +29,27 @@ class Scheduled:
 
 
 class MissionDeskEnv:
-    def __init__(self, trace_path: Path, seed: int = 1, *, no_persistence: bool = False, no_green: bool = False, magic_observations: bool = False, service_url: str | None = None, user_simulator: Any | None = None):
+    def __init__(
+        self,
+        trace_path: Path,
+        seed: int = 1,
+        *,
+        no_persistence: bool = False,
+        no_green: bool = False,
+        magic_observations: bool = False,
+        service_url: str | None = None,
+        user_simulator: Any | None = None,
+        scenario: Scenario | Path | str | None = None,
+    ):
         self.rng = random.Random(seed)
         self.now = 0
         self.seq = 0
         self.queue: list[Scheduled] = []
         self.trace = TraceWriter(trace_path)
-        self.state: WorldState = initial_state(seed, no_persistence=no_persistence, no_green=no_green)
+        self.state: WorldState = initial_state(seed, no_persistence=no_persistence, no_green=no_green, scenario=scenario)
+        self.scenario = self.state.scenario
+        if self.scenario is None:
+            raise ValueError("MissionDeskEnv requires a loaded scenario")
         self.no_persistence = no_persistence
         self.no_green = no_green
         self.magic_observations = magic_observations
@@ -47,10 +62,15 @@ class MissionDeskEnv:
         self.idp_sessions: dict[str, str] = {}
         self.user_simulator = user_simulator
         self._ensure_identity_service()
-        self.trace.emit("state_transition", 0, {"kind": "environment_started", "seed": seed, "hosts": list(self.state.hosts)})
-        self.trace.emit("security_impact_event", 0, {"kind": "compromise_active", "host_ref": "ws-alice"})
+        self.trace.emit(
+            "state_transition",
+            0,
+            {"kind": "environment_started", "seed": seed, "scenario_id": self.scenario.scenario_id, "hosts": list(self.state.hosts)},
+        )
+        for host_id in self.scenario.attacker.get("initial_compromised_hosts", []):
+            self.trace.emit("security_impact_event", 0, {"kind": "compromise_active", "host_ref": host_id})
         if not no_green:
-            for i, t in enumerate([2, 8, 14, 20, 26, 32]):
+            for i, t in enumerate(self.scenario.green_task_schedule):
                 self.schedule(t, lambda i=i: self.green_task(i))
 
     def _ensure_identity_service(self) -> None:
@@ -70,7 +90,7 @@ class MissionDeskEnv:
             )
             self._local_service_thread.start()
             self.service_url = f"http://127.0.0.1:{self._local_service.server_port}"
-        self._service_post("/admin/reset_state", {}, user="system")
+        self._service_post("/admin/reset_state", {"users": sorted(self.scenario.user_ids)}, user="system")
         self.ingest_service_logs()
 
     def schedule(self, delay: int, fn: Callable) -> None:
@@ -338,12 +358,14 @@ class MissionDeskEnv:
             self.telemetry("network", {"source.host": self.state.attacker_host, "destination.host": "app-1", "event.action": "connection_attempt"}, parents=[parent])
             out["stdout"] = "files-1:445 app-1:8080 idp-1:8081"
         elif action == "attempt_credential_access":
-            self.telemetry("credential_access", {"process.name": "dump", "host.name": self.state.attacker_host, "user.name": "alice"}, parents=[parent])
-            credential = self._idp_use_credential("bob", self.state.attacker_host, "files-1")
+            credential_user = self.scenario.attacker["credential_target_user"]
+            lateral_host = self.scenario.attacker["lateral_target_host"]
+            self.telemetry("credential_access", {"process.name": "dump", "host.name": self.state.attacker_host, "user.name": self.scenario.attacker["initial_credentials"][0]}, parents=[parent])
+            credential = self._idp_use_credential(credential_user, self.state.attacker_host, lateral_host)
             if credential["ok"]:
-                self.state.attacker_credentials.add("bob")
-                self.trace.emit("security_impact_event", self.now, {"kind": "credential_compromised", "user": "bob", "evidence": "idp_credential_use"}, parents=[parent, *credential["events"]])
-                out["stdout"] = "credential material for bob"
+                self.state.attacker_credentials.add(credential_user)
+                self.trace.emit("security_impact_event", self.now, {"kind": "credential_compromised", "user": credential_user, "evidence": "idp_credential_use"}, parents=[parent, *credential["events"]])
+                out["stdout"] = f"credential material for {credential_user}"
             else:
                 out["stderr"] = f"credential material invalidated: {credential['reason']}"
         elif action == "establish_persistence":
@@ -352,20 +374,24 @@ class MissionDeskEnv:
                 self.trace.emit("security_impact_event", self.now, {"kind": "persistence_active", "host_ref": self.state.attacker_host}, parents=[parent])
             self.telemetry("persistence", {"file.path": "/tmp/.mission-updater", "host.name": self.state.attacker_host}, parents=[parent])
         elif action == "lateral_move":
-            credential = self._idp_use_credential("bob", self.state.attacker_host, "files-1") if "bob" in self.state.attacker_credentials else {"ok": False, "reason": "credential_not_obtained", "events": []}
-            if credential["ok"] and not self.state.hosts["files-1"].isolated:
-                self.state.hosts["files-1"].compromised = True
-                self.state.attacker_host = "files-1"
-                self.trace.emit("security_impact_event", self.now, {"kind": "lateral_movement", "src": "ws-alice", "dst": "files-1"}, parents=[parent, *credential["events"]])
-                out["stdout"] = "lateral movement to files-1"
+            credential_user = self.scenario.attacker["credential_target_user"]
+            lateral_host = self.scenario.attacker["lateral_target_host"]
+            credential = self._idp_use_credential(credential_user, self.state.attacker_host, lateral_host) if credential_user in self.state.attacker_credentials else {"ok": False, "reason": "credential_not_obtained", "events": []}
+            if credential["ok"] and not self.state.hosts[lateral_host].isolated:
+                src = self.state.attacker_host
+                self.state.hosts[lateral_host].compromised = True
+                self.state.attacker_host = lateral_host
+                self.trace.emit("security_impact_event", self.now, {"kind": "lateral_movement", "src": src, "dst": lateral_host}, parents=[parent, *credential["events"]])
+                out["stdout"] = f"lateral movement to {lateral_host}"
             else:
                 out["stderr"] = f"lateral movement blocked: {credential['reason']}"
-            self.telemetry("lateral_movement", {"source.host": "ws-alice", "destination.host": "files-1", "user.name": "bob"}, parents=[parent])
+            self.telemetry("lateral_movement", {"source.host": self.scenario.attacker["initial_host"], "destination.host": lateral_host, "user.name": credential_user}, parents=[parent])
         elif action == "collect":
-            if self.state.attacker_host == "files-1":
-                self.state.collected_files.add("mission.txt")
-                self.trace.emit("security_impact_event", self.now, {"kind": "collection", "file_ref": "mission.txt"}, parents=[parent])
-            self.telemetry("file", {"file.path": "/share/mission.txt", "event.action": "read"}, parents=[parent])
+            target = self.scenario.attacker["collection_target"]
+            if self.state.attacker_host == self.scenario.attacker["lateral_target_host"]:
+                self.state.collected_files.add(target)
+                self.trace.emit("security_impact_event", self.now, {"kind": "collection", "file_ref": target}, parents=[parent])
+            self.telemetry("file", {"file.path": f"/share/{target}", "event.action": "read"}, parents=[parent])
         self.trace.emit("action_completed", self.now, {"action": action, "success": "stderr" not in out, "attacker_output": out, "duration": 1}, agent="attacker", parents=[parent])
 
     # Defender actions

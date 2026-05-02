@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
-from badlands.core.datasets import load_auth_affinities
+from badlands.core.datasets import AuthAffinity, load_auth_affinities
+from badlands.core.scenario import Scenario, load_scenario
 
 
 @dataclass
@@ -40,36 +43,55 @@ class WorldState:
     alerts: list[dict] = field(default_factory=list)
     telemetry: list[dict] = field(default_factory=list)
     cases: list[dict] = field(default_factory=list)
-    auth_affinities: dict = field(default_factory=dict)
+    auth_affinities: dict[str, AuthAffinity] = field(default_factory=dict)
+    scenario: Scenario | None = None
 
 
-def initial_state(seed: int = 1, *, no_persistence: bool = False, no_green: bool = False) -> WorldState:
-    state = WorldState(seed=seed)
-    state.hosts = {
-        "ws-alice": Host("ws-alice", "workstation", "alice", 2, compromised=True),
-        "ws-bob": Host("ws-bob", "workstation", "bob", 2),
-        "ws-carol": Host("ws-carol", "workstation", "carol", 1),
-        "ws-dave": Host("ws-dave", "workstation", "dave", 1),
-        "ws-erin": Host("ws-erin", "workstation", "erin", 1),
-        "ws-frank": Host("ws-frank", "workstation", "frank", 1),
-        "ws-grace": Host("ws-grace", "workstation", "grace", 1),
-        "ws-heidi": Host("ws-heidi", "workstation", "heidi", 1),
-        "ws-ivan": Host("ws-ivan", "workstation", "ivan", 1),
-        "ws-judy": Host("ws-judy", "workstation", "judy", 1),
-        "ws-mallory": Host("ws-mallory", "workstation", "mallory", 1),
-        "ws-oscar": Host("ws-oscar", "workstation", "oscar", 1),
-        "files-1": Host("files-1", "file_share", "svc-files", 5, files={"mission.txt": "target package"}),
-        "app-1": Host("app-1", "mission_app", "svc-app", 5),
-        "idp-1": Host("idp-1", "identity", "svc-idp", 5),
-    }
-    affinities = load_auth_affinities()
+def initial_state(
+    seed: int = 1,
+    *,
+    no_persistence: bool = False,
+    no_green: bool = False,
+    scenario: Scenario | Path | str | None = None,
+) -> WorldState:
+    loaded = scenario if isinstance(scenario, Scenario) else load_scenario(scenario) if scenario else load_scenario()
+    attacker = loaded.attacker
+    state = WorldState(
+        seed=seed,
+        attacker_host=str(attacker["initial_host"]),
+        attacker_credentials=set(attacker.get("initial_credentials", [])),
+        scenario=loaded,
+    )
+    compromised_hosts = set(attacker.get("initial_compromised_hosts", []))
+    state.hosts = {host["host_id"]: _host_from_fixture(host, compromised_hosts) for host in loaded.hosts}
+    affinities = load_auth_affinities(loaded.auth_affinity_path)
     state.auth_affinities = affinities
-    state.users = {
-        user_id: User(user_id, affinity.host_id, credentials_exposed=(user_id == "alice"))
-        for user_id, affinity in affinities.items()
-    }
+    state.users = {user["user_id"]: _user_from_fixture(user, affinities) for user in loaded.users}
     if no_persistence:
-        state.hosts["ws-alice"].persistence = False
+        for host in state.hosts.values():
+            host.persistence = False
     if no_green:
         state.users = {}
     return state
+
+
+def _host_from_fixture(data: dict[str, Any], compromised_hosts: set[str]) -> Host:
+    host_id = str(data["host_id"])
+    return Host(
+        host_id=host_id,
+        role=str(data["role"]),
+        owner=str(data["owner"]),
+        criticality=int(data["criticality"]),
+        compromised=host_id in compromised_hosts,
+        files=dict(data.get("files", {})),
+        processes=list(data.get("processes", [])),
+    )
+
+
+def _user_from_fixture(data: dict[str, Any], affinities: dict[str, AuthAffinity]) -> User:
+    user_id = str(data["user_id"])
+    affinity = affinities.get(user_id)
+    host_id = affinity.host_id if affinity is not None else str(data["primary_host"])
+    if host_id != data["primary_host"]:
+        raise ValueError(f"user {user_id} fixture primary_host does not match auth-affinity dataset")
+    return User(user_id, host_id, credentials_exposed=bool(data.get("credentials_exposed", False)))

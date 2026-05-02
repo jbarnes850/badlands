@@ -1,0 +1,95 @@
+{
+  "scenario_id": "mission_desk_enclave",
+  "name": "Mission Desk Enclave",
+  "description": "Small enterprise mission cell with workstations, identity, mission app, file share, ticket surface, and replayable SIEM/EDR-style telemetry.",
+  "auth_affinity_dataset": "badlands/datasets/lanl_auth_affinity_sample.csv",
+  "attacker": {
+    "initial_host": "ws-alice",
+    "initial_credentials": ["alice"],
+    "initial_compromised_hosts": ["ws-alice"],
+    "credential_target_user": "bob",
+    "lateral_target_host": "files-1",
+    "collection_target": "mission.txt"
+  },
+  "hosts": [
+    {"host_id": "ws-alice", "role": "workstation", "owner": "alice", "criticality": 2},
+    {"host_id": "ws-bob", "role": "workstation", "owner": "bob", "criticality": 2},
+    {"host_id": "ws-carol", "role": "workstation", "owner": "carol", "criticality": 1},
+    {"host_id": "ws-dave", "role": "workstation", "owner": "dave", "criticality": 1},
+    {"host_id": "ws-erin", "role": "workstation", "owner": "erin", "criticality": 1},
+    {"host_id": "ws-frank", "role": "workstation", "owner": "frank", "criticality": 1},
+    {"host_id": "ws-grace", "role": "workstation", "owner": "grace", "criticality": 1},
+    {"host_id": "ws-heidi", "role": "workstation", "owner": "heidi", "criticality": 1},
+    {"host_id": "ws-ivan", "role": "workstation", "owner": "ivan", "criticality": 1},
+    {"host_id": "ws-judy", "role": "workstation", "owner": "judy", "criticality": 1},
+    {"host_id": "ws-mallory", "role": "workstation", "owner": "mallory", "criticality": 1},
+    {"host_id": "ws-oscar", "role": "workstation", "owner": "oscar", "criticality": 1},
+    {"host_id": "files-1", "role": "file_share", "owner": "svc-files", "criticality": 5, "files": {"mission.txt": "target package"}},
+    {"host_id": "app-1", "role": "mission_app", "owner": "svc-app", "criticality": 5},
+    {"host_id": "idp-1", "role": "identity", "owner": "svc-idp", "criticality": 5}
+  ],
+  "users": [
+    {"user_id": "alice", "primary_host": "ws-alice", "credentials_exposed": true},
+    {"user_id": "bob", "primary_host": "ws-bob"},
+    {"user_id": "carol", "primary_host": "ws-carol"},
+    {"user_id": "dave", "primary_host": "ws-dave"},
+    {"user_id": "erin", "primary_host": "ws-erin"},
+    {"user_id": "frank", "primary_host": "ws-frank"},
+    {"user_id": "grace", "primary_host": "ws-grace"},
+    {"user_id": "heidi", "primary_host": "ws-heidi"},
+    {"user_id": "ivan", "primary_host": "ws-ivan"},
+    {"user_id": "judy", "primary_host": "ws-judy"},
+    {"user_id": "mallory", "primary_host": "ws-mallory"},
+    {"user_id": "oscar", "primary_host": "ws-oscar"}
+  ],
+  "mission": {
+    "task_template": "use_mission_app",
+    "green_task_schedule": [2, 8, 14, 20, 26, 32],
+    "dependencies": {
+      "use_mission_app": ["idp-1", "app-1", "files-1"]
+    }
+  },
+  "services": [
+    {"service_id": "idp", "host_id": "idp-1", "kind": "identity", "criticality": 5},
+    {"service_id": "mission_app", "host_id": "app-1", "kind": "web_app", "criticality": 5, "depends_on": ["idp", "file_share"]},
+    {"service_id": "file_share", "host_id": "files-1", "kind": "file_share", "criticality": 5},
+    {"service_id": "ticket", "host_id": "app-1", "kind": "ticket_surface", "criticality": 3}
+  ],
+  "provenance": [
+    {
+      "field": "auth_affinity_dataset",
+      "taxonomy": "virtualisation:user-simulation",
+      "source": "LANL public cyber datasets user-computer authentication associations",
+      "url": "https://csr.lanl.gov/data/",
+      "validation_plan": "Replace fixture sample with scripted transform from public LANL auth association release."
+    },
+    {
+      "field": "hosts",
+      "taxonomy": "virtualisation:network-host-simulation",
+      "source": "Mission Desk minimum environment contract and NCSC baseline-security guidance",
+      "url": "https://www.ncsc.gov.uk/blogs/why-cyber-defenders-need-to-be-ready-for-frontier-ai",
+      "validation_plan": "Calibrate asset inventory, criticality, and dependencies against mission-owner scenario reviews."
+    },
+    {
+      "field": "mission.green_task_schedule",
+      "taxonomy": "modelling:sequence-time",
+      "source": "arXiv 2604.08805v1 sequence modelling and Badlands event-driven timing contract",
+      "url": "https://arxiv.org/abs/2604.08805",
+      "validation_plan": "Expand into scenario-specific work calendars in DS-28 without changing trace semantics."
+    },
+    {
+      "field": "mission.dependencies",
+      "taxonomy": "modelling:action-reward",
+      "source": "NCSC warning that automated mitigation can disrupt operations more than the attack",
+      "url": "https://www.ncsc.gov.uk/blogs/why-cyber-defenders-need-to-be-ready-for-frontier-ai",
+      "validation_plan": "Propagate dependency failure through active services in DS-18."
+    },
+    {
+      "field": "attacker",
+      "taxonomy": "virtualisation:threat-simulation",
+      "source": "Mordor/CALDERA/ATT&CK-style intrusion chain used as current validation plan",
+      "url": "https://caldera.mitre.org/",
+      "validation_plan": "Calibrate attacker action prerequisites and artifacts against CALDERA or ATT&CK-mapped replay traces."
+    }
+  ]
+}

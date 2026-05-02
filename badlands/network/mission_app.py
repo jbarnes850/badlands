@@ -12,6 +12,22 @@ TICKETS = ROOT / "tickets.jsonl"
 STATE = ROOT / "state.json"
 
 
+DEFAULT_USERS = [
+    "alice",
+    "bob",
+    "carol",
+    "dave",
+    "erin",
+    "frank",
+    "grace",
+    "heidi",
+    "ivan",
+    "judy",
+    "mallory",
+    "oscar",
+]
+
+
 def _state() -> dict:
     if STATE.exists():
         return json.loads(STATE.read_text())
@@ -23,23 +39,10 @@ def _save_state(state: dict) -> None:
     STATE.write_text(json.dumps(state, sort_keys=True))
 
 
-def _initial_state() -> dict:
+def _initial_state(user_ids: list[str] | None = None) -> dict:
     users = {
         name: {"password": f"{name}-pw", "locked": False, "sessions": []}
-        for name in [
-            "alice",
-            "bob",
-            "carol",
-            "dave",
-            "erin",
-            "frank",
-            "grace",
-            "heidi",
-            "ivan",
-            "judy",
-            "mallory",
-            "oscar",
-        ]
+        for name in (user_ids or DEFAULT_USERS)
     }
     return {"app_available": True, "isolated_hosts": [], "users": users, "session_counter": 0}
 
@@ -142,9 +145,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         user = self.headers.get("X-User", "anonymous")
         if self.path == "/admin/reset_state":
+            body = self._json_body()
             ROOT.mkdir(exist_ok=True)
             FILES.mkdir(exist_ok=True)
-            _save_state(_initial_state())
+            _save_state(_initial_state(body.get("users")))
             LOG.write_text("")
             if TICKETS.exists():
                 TICKETS.write_text("")
