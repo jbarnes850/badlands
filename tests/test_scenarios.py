@@ -71,6 +71,12 @@ def test_changing_green_task_schedule_changes_trace_behavior(tmp_path: Path):
     assert short_env.run(40)["mission_tasks_completed"] == 1
 
 
+def test_scan_banners_are_unique_by_host_port(tmp_path: Path):
+    env = MissionDeskEnv(tmp_path / "scan.jsonl", seed=7)
+    banners = [f"{host}:{port}" for host, port in env._service_banners()]
+    assert banners == ["idp-1:8081", "app-1:8080", "files-1:445"]
+
+
 def test_scenario_fixture_truth_does_not_leak_to_observations(tmp_path: Path):
     env = MissionDeskEnv(tmp_path / "obs.jsonl", seed=7)
     env.run(10)

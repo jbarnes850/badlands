@@ -404,10 +404,15 @@ class MissionDeskEnv:
 
     def _service_banners(self) -> list[tuple[str, str]]:
         ports = {"file_share": "445", "web_app": "8080", "identity": "8081", "ticket_surface": "8080"}
-        return [
-            (str(service["host_id"]), ports.get(str(service.get("kind")), "8080"))
-            for service in self.scenario.services
-        ]
+        banners: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for service in self.scenario.services:
+            banner = (str(service["host_id"]), ports.get(str(service.get("kind")), "8080"))
+            if banner in seen:
+                continue
+            seen.add(banner)
+            banners.append(banner)
+        return banners
 
     # Defender actions
     def defender(self, action: str, params: dict | None = None, *, decision_event_id: str | None = None) -> None:
