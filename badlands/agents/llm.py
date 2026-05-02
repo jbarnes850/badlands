@@ -257,7 +257,7 @@ class CachedLLMActor:
                 ], model=self.model if self.model != "cached" else None, validator=lambda candidate: self._validate_decision(candidate, allowed_evidence_ids))
             except InvalidLLMDecision:
                 raise
-            except ValueError as exc:
+            except Exception as exc:
                 raise InvalidLLMDecision(self.role, {}, str(exc)) from exc
             path.write_text(json.dumps(raw, sort_keys=True, indent=2))
         self._validate_decision(raw, allowed_evidence_ids)

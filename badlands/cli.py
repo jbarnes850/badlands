@@ -15,8 +15,13 @@ ATTACK_DURATIONS = {"discover_local": 3, "scan_network": 5, "attempt_credential_
 DEFENDER_DURATIONS = {"triage_alert": 3, "query_endpoint": 2, "query_identity": 2, "isolate_host": 2, "reset_account": 3, "rollback": 4}
 
 
-def _invalid_llm(env: MissionDeskEnv, role: str, exc: InvalidLLMDecision) -> None:
-    env.trace.emit("llm_decision_invalid", env.now, {"role": role, "raw_decision": exc.raw, "reason": exc.reason}, agent=role)
+def _invalid_llm(env: MissionDeskEnv, role: str, exc: InvalidLLMDecision, observation: dict[str, Any]) -> None:
+    env.trace.emit(
+        "llm_decision_invalid",
+        env.now,
+        {"role": role, "raw_decision": exc.raw, "reason": exc.reason, "observation": observation},
+        agent=role,
+    )
 
 
 def _valid_llm(env: MissionDeskEnv, role: str, observation: dict[str, Any], decision: LLMDecision) -> str:
@@ -87,7 +92,7 @@ def _schedule_llm_actor(
         try:
             decision: LLMDecision = actor.decide(observation)
         except InvalidLLMDecision as exc:
-            _invalid_llm(env, role, exc)
+            _invalid_llm(env, role, exc, observation)
             env.schedule(retry_delay, lambda: tick(remaining - 1))
             return
         decision_event_id = _valid_llm(env, role, observation, decision)

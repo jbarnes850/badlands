@@ -173,3 +173,16 @@ def test_validator_retry_exhaustion_preserves_invalid_decision(tmp_path: Path):
         )
     assert err.value.raw["evidence_ids"] == ["telemetry_001", "telemetry_002"]
     assert "evidence_ids not present" in err.value.reason
+
+
+def test_llm_transport_failure_becomes_invalid_decision(tmp_path: Path):
+    class TimeoutClient:
+        model = "fake"
+
+        def complete_json(self, messages, *, model=None, validator=None):
+            raise TimeoutError("timed out")
+
+    with pytest.raises(InvalidLLMDecision) as err:
+        AttackerLLM(cache_dir=tmp_path, seed=1, client=TimeoutClient()).decide({"results": []})
+    assert err.value.raw == {}
+    assert "timed out" in err.value.reason
