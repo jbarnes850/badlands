@@ -1,0 +1,16 @@
+services:
+  mission-app:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ../badlands:/app/badlands:ro
+      - badlands-mission:/tmp/badlands_mission
+    command: python -m badlands.network.mission_app
+    ports:
+      - "18080:8080"
+    networks: [badlands]
+networks:
+  badlands:
+    driver: bridge
+volumes:
+  badlands-mission:

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "badlands"
+version = "0.1.0"
+description = "Active-network cyber self-play environment substrate"
+requires-python = ">=3.11"
+dependencies = ["jsonschema>=4.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+badlands-episode = "badlands.cli:main"
+badlands-replay = "badlands.scoring.replay:main"
+
+[tool.setuptools.packages.find]
+include = ["badlands*"]
+
+[tool.setuptools.package-data]
+badlands = ["schemas/*.json", "datasets/*.csv", "datasets/*.md"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
