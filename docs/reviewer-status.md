@@ -30,6 +30,8 @@
 - Green LLM observations include durable user identity, role, host, workflow counters, and recent ticket history.
 - Score snapshots include an evidence map from nonzero score fields to source event ids.
 - Identity realism tests now show IdP state changes measured security risk, and lockout-related mission harm remains trace-derived.
+- Mission Desk world definition now loads from `badlands/scenarios/mission_desk.json`: hosts, users, services, green cadence, mission dependencies, criticality, auth-affinity reference, and attacker starting assumptions are scenario fixture fields.
+- Scenario fixture provenance maps realism assumptions to dataset/workflow/platform anchors and to arXiv virtualisation/modelling-gap categories.
 
 ## Intentionally incomplete
 
@@ -37,3 +39,5 @@
 - IdP and mission app currently share one local Python HTTP process. Risk: fewer deployment and network-boundary side effects than a separately deployed IdP container. Next step: split the IdP into its own compose service once this identity-state contract is stable.
 - Email is represented through ticket-like artifacts, not SMTP/IMAP. Risk: less realistic phishing/report workflow. Next step: add local MailHog-style service or stdlib mailbox endpoint.
 - Durations/rates are contract-informed constants, not yet calibrated from OpTC/LANL/CALDERA. Next step: add calibration fixtures and cite per-action sources.
+- Scenario dependencies are represented in the fixture but not fully propagated through active service health. Risk: dependency graphs are inspectable before they are operationally authoritative. Next step: DS-18.
+- Mission task templates are scenario fields, but the mission app still exposes the current compact file/ticket workflow. Risk: workflow richness remains limited. Next step: DS-28.

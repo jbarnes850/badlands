@@ -20,7 +20,7 @@ badlands-replay = "badlands.scoring.replay:main"
 include = ["badlands*"]
 
 [tool.setuptools.package-data]
-badlands = ["schemas/*.json", "datasets/*.csv", "datasets/*.md"]
+badlands = ["schemas/*.json", "datasets/*.csv", "datasets/*.md", "scenarios/*.json"]
 
 [tool.ruff]
 line-length = 100

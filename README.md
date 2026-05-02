@@ -53,6 +53,9 @@ Run a seeded Mission Desk episode and replay scoring:
 uv run badlands-episode --seed 7 --defender evidence_gathering --trace runs/mission-desk.jsonl
 uv run badlands-replay runs/mission-desk.jsonl
 
+# Optional scenario override
+uv run badlands-episode --scenario badlands/scenarios/mission_desk.json --trace runs/mission-desk.jsonl
+
 # Optional cached/live actor path
 uv run badlands-episode --green-actor llm --attacker-actor llm --defender-actor llm --trace runs/mission-desk-llm.jsonl
 ```
@@ -76,4 +79,6 @@ python3 -m badlands.scoring.replay runs/mission-desk.jsonl
 - `docs/trace-schema.md` — JSONL trace schema summary.
 - `docs/reviewer-status.md` — satisfied and intentionally deferred contract items.
 - `docs/dataset-fixtures.md` — LANL-derived auth-affinity fixture provenance.
+- `docs/identity-service-contract.md` — identity provider service contract for authoritative auth/session/reset/credential state.
+- `docs/scenario-fixtures.md` — scenario schema, provenance rules, and arXiv/NCSC taxonomy mapping for fixture-driven worlds.
 - `docs/dgx-spark-live-inference.md` — opt-in Spark/vLLM live actor verification instructions, including current per-role attacker/defender/green endpoints.

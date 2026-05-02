@@ -2,6 +2,11 @@
 
 This contract defines what an implementation must satisfy before Badlands can claim construct-valid environment measurement.
 
+The current Mission Desk world inventory and cadence are defined in
+`badlands/scenarios/mission_desk.json`; see
+[`docs/scenario-fixtures.md`](scenario-fixtures.md) for the scenario schema and
+provenance contract.
+
 ## Hidden simulator state
 
 Hidden state is owned by the active network and is never emitted directly to agents.
