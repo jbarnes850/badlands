@@ -32,6 +32,10 @@
 - Identity realism tests now show IdP state changes measured security risk, and lockout-related mission harm remains trace-derived.
 - Mission Desk world definition now loads from `badlands/scenarios/mission_desk.json`: hosts, users, services, green cadence, mission dependencies, criticality, auth-affinity reference, and attacker starting assumptions are scenario fixture fields.
 - Scenario fixture provenance maps realism assumptions to dataset/workflow/platform anchors and to arXiv virtualisation/modelling-gap categories.
+- Mission app, file share, and ticket outcomes are now service-authoritative for the current compact workflow: `/mission/task`, `/file/<name>`, `/ticket`, `/tickets`, and `/ticket/update` own service state and emit trace-ingested telemetry.
+- Green `use_mission_app`, `read_write_file`, and `create_ticket` outcomes route through active service endpoints. Mission task trace events cite service/auth/ticket evidence in `source_event_ids`.
+- File access requires IdP session validation and emits both auth validation telemetry and service `file_read` telemetry.
+- Defender ticket visibility is role-valid: tickets appear through service telemetry and mission/ticket trace artifacts, not hidden service state.
 
 ## Intentionally incomplete
 
@@ -40,4 +44,4 @@
 - Email is represented through ticket-like artifacts, not SMTP/IMAP. Risk: less realistic phishing/report workflow. Next step: add local MailHog-style service or stdlib mailbox endpoint.
 - Durations/rates are contract-informed constants, not yet calibrated from OpTC/LANL/CALDERA. Next step: add calibration fixtures and cite per-action sources.
 - Scenario dependencies are represented in the fixture but not fully propagated through active service health. Risk: dependency graphs are inspectable before they are operationally authoritative. Next step: DS-18.
-- Mission task templates are scenario fields, but the mission app still exposes the current compact file/ticket workflow. Risk: workflow richness remains limited. Next step: DS-28.
+- Mission task templates are scenario fields, and the active service now owns the compact file/ticket workflow. Risk: workflow richness remains limited. Next step: DS-28.

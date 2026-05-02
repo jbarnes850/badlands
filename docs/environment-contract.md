@@ -36,6 +36,13 @@ in the local IdP service; simulator state may only mirror service evidence.
 - Process trees, command lines, parent/child relationships, network connections.
 - Persistence mechanisms and scheduled tasks.
 
+The current mission app, file-share, and ticket authority boundary is specified
+in [`docs/mission-service-contract.md`](mission-service-contract.md). Mission
+task completion/failure, file reads, and ticket creation/update are service
+state transitions with trace-ingested service telemetry; Python may schedule
+work and mirror observed service outcomes but must not silently replace service
+truth.
+
 ### Attacker state
 
 - Footholds, privileges, known credentials, discovered topology, persistence, in-flight actions.
