@@ -1,0 +1,1 @@
+{"intent":"complete mission work","action":"use_mission_app","parameters":{"task":"update mission file"},"confidence":0.8,"evidence_ids":[],"rationale":"The visible mission workflow indicates normal app work is available.","expected_effect":"The user will attempt to complete the mission task in the app.","risk":"The app or account may fail when the action executes."}
