@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from badlands.agents.decision_quality import decision_quality_report
 from badlands.agents.llm import AttackerLLM, DefenderLLM, GreenUserLLM, InvalidLLMDecision, LLMDecision
 from badlands.core.attacker_actions import ATTACKER_ACTION_DURATIONS
 from badlands.core.defender_actions import DEFENDER_ACTION_DURATIONS
@@ -422,6 +423,7 @@ def build_report(
         "replay": {"ok": replay_ok, "score": replay_score},
         "score_summary": score_snapshots[-1]["payload"],
         "qualitative_output_checklist": _qualitative_outputs(events),
+        "decision_quality": decision_quality_report(events),
         "ds29_handoff": {
             "consume_fields": [
                 "role",

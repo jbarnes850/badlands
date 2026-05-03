@@ -29,7 +29,7 @@ uv run badlands-replay runs/<issue>-smoke.jsonl
 | Action surface | Precondition/success/failure/duration tests | `action_requested`, `action_started`, `action_completed` | No no-op actions; side effects are observable |
 | Noise/sensor model | Directional ablation tests | no-noise/perfect-sensor traces | Uncertainty changes decisions/outcomes |
 | Live LLM behavior | DS-24 harness, replay, qualitative report | live trace, live report, cache path | Role isolation, invalid decisions, token/latency/retry cost |
-| Prompt/rubric changes | Fixture tests plus at least one live-output review | rubric report, model-output excerpts | Valid JSON is not enough; inspect behavior |
+| Prompt/rubric changes | Fixture tests plus at least one live-output review | `decision_quality` rubric report, model-output excerpts | Valid JSON is not enough; inspect behavior |
 | Capability-curve metadata | Ledger/schema validation plus report inspection | run ledger entry, report metadata | Model, endpoint, scaffold, memory, tool surface, scenario, budget, comparison axis, served context |
 | Campaign/memory | Replay without SDK/session state, negative leak tests | campaign trace, SDK correlation metadata | SDK memory is role-isolated and non-canonical |
 | Docs/provenance | Source/path existence checks | updated docs and links | Implemented evidence versus aspiration |

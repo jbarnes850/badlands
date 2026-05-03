@@ -15,6 +15,13 @@ Scoring replay uses only trace events. Agent observation views must reference ev
 
 Valid LLM actor decisions are recorded as `llm_decision` events with the supplied observation, raw model decision, constrained `evidence_ids`, rationale, expected effect, and risk. Live LLM runs also include `inference_telemetry`: role, endpoint, model, cache key/path, cache hit/miss, prompt token estimate, completion tokens, wall latency, attempt count, repair count/attempts, parse failure counts, validation error, invalid-decision reason, malformed `raw_outputs` when repair fails, and optional SDK correlation IDs. Invalid decisions are recorded as `llm_decision_invalid` and do not schedule an action; their raw malformed outputs must remain inspectable from the trace/report.
 
+DS-27 live reports derive `decision_quality` from these LLM decision events.
+The derived report is not canonical state and is not used for replay scoring.
+It exists so reviewers can inspect role-specific behavior, repeated actions,
+evidence grounding, unsupported evidence ids, hidden-state claims,
+blast-radius/mission reasoning, and green SOC-like language without reading
+hidden simulator state.
+
 Dependency propagation is recorded as `dependency_state_changed`; mission and security score evidence may cite those events through `source_event_ids`.
 
 Attacker objective progress is recorded as trace-backed

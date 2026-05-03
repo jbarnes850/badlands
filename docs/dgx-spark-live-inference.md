@@ -142,8 +142,17 @@ exact blocker to the report path.
 The report separates endpoint failure, serving bottleneck, agent-loop
 bottleneck, and environment failure. It includes wall-clock time, output
 tokens/sec, per-role latency, invalid-decision rate, repair count, replay
-result, score summary, trace path, cache path, role-isolation metadata, and
-qualitative samples of attacker/defender/green outputs.
+result, score summary, trace path, cache path, role-isolation metadata,
+qualitative samples of attacker/defender/green outputs, and the DS-27
+`decision_quality` rubric summary from `docs/model-output-rubric.md`.
+
+`decision_quality` is a trace-derived reviewer aid, not an automatic model
+grade. It summarizes per-role action sequences, repeated actions, cited and
+unsupported evidence ids, suspected hidden-state claims, defender disruptive
+actions, defender overreaction flags, blast-radius and mission-awareness
+mentions, green ticket/blockage language, and green SOC-like language. These
+fields are derived from `llm_decision` and `llm_decision_invalid` events only;
+they do not read simulator hidden state or mutate the canonical JSONL trace.
 
 Repair accounting is attempt-based. `repair_count`/`repairs_attempted` means a
 repair call was actually made; final malformed repaired output increments

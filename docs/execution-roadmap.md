@@ -264,6 +264,8 @@ Success criteria:
   ids;
 - fixture tests flag brittle output patterns;
 - prompts remain concise and aligned with implemented actions.
+- rubric report references `docs/model-output-rubric.md` and remains a
+  descriptive reviewer aid rather than an automatic model grade.
 
 Required live verification:
 

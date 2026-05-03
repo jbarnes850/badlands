@@ -16,9 +16,12 @@ class FakeClient:
 
     def complete_json(self, messages, *, model=None, validator=None):
         assert "contained mission-cyber environment" in messages[0]["content"]
+        assert "Cite only event ids you can see" in messages[0]["content"]
+        assert "describe uncertainty instead of unsupported conclusions" in messages[0]["content"]
         text = messages[-1]["content"]
         if '"role": "green"' in text:
             assert "You are a mission user" in messages[0]["content"]
+            assert "Avoid SOC language" in messages[0]["content"]
             return {
                 "intent": "complete mission work",
                 "action": "use_mission_app",
@@ -31,6 +34,7 @@ class FakeClient:
             }
         if '"role": "defender"' in text:
             assert "reduce security risk while preserving mission continuity" in messages[0]["content"]
+            assert "mission-continuity risk" in messages[0]["content"]
             return {
                 "intent": "investigate",
                 "action": "query_endpoint",
@@ -42,6 +46,7 @@ class FakeClient:
                 "risk": "Waiting may allow attacker progress during investigation.",
             }
         assert "progress through plausible intrusion stages" in messages[0]["content"]
+        assert "Cite visible observation event ids" in messages[0]["content"]
         return {
             "intent": "map enclave",
             "action": "scan_network",

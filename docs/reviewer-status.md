@@ -60,6 +60,10 @@
 - Live validation green observations use scenario workflow tasks rather than
   synthetic `task-live-*` placeholders, so qualitative model-output inspection
   sees the same mission workflow surface as offline episodes.
+- Live validation reports include DS-27 `decision_quality` summaries derived
+  from trace-visible LLM decision events: repeated actions, evidence-id
+  grounding, unsupported evidence ids, suspected hidden-state claims, defender
+  blast-radius/overreaction cues, and green SOC-like behavior.
 
 ## Intentionally incomplete
 

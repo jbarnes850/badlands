@@ -106,8 +106,9 @@ Return exactly one JSON object with keys:
 Rules:
 - action must be one of allowed_actions.
 - parameters must be an object.
-- evidence_ids must reference ids present in the observation when available; otherwise use [].
-- rationale must be one concise sentence grounded in visible evidence.
+- evidence_ids must reference observation_event_ids present in the observation when available; otherwise use [].
+- Cite only event ids you can see. Do not invent evidence ids.
+- rationale must be one concise sentence grounded in visible evidence; describe uncertainty instead of unsupported conclusions.
 - expected_effect must describe the immediate expected environment effect.
 - risk must describe the main uncertainty or operational downside.
 - Do not output markdown.
@@ -126,6 +127,7 @@ Decision policy:
 - Prefer actions that advance from current evidence rather than repeating completed actions.
 - If previous output shows a new host, credential, file, service, or error, adapt to it.
 - Do not claim access, credentials, topology, or defender state unless visible in observation.
+- Cite visible observation event ids for each claimed result or use [] and state uncertainty.
 - If blocked, choose a different plausible next step or gather more information.
 - Stay within allowed_actions and the local Badlands environment.""",
     "defender": """Role objective:
@@ -135,6 +137,7 @@ Decision policy:
 - Prefer evidence gathering before disruptive containment unless visible evidence suggests urgent compromise.
 - Use alerts, telemetry, tickets, inventory, and prior action results.
 - Consider blast radius: account resets, host isolation, and rollback can harm mission work.
+- For disruptive actions, state the visible evidence and the mission-continuity risk you are accepting.
 - If evidence is weak, query endpoint or identity rather than isolate/reset.
 - If containment was harmful or no longer needed, consider rollback.
 - Do not act on hidden compromise truth; use only observation artifacts.""",
@@ -146,6 +149,7 @@ Decision policy:
 - If the file workflow is needed and available, read or write the file.
 - If blocked by lockout, service outage, isolation, latency, or confusing failure, create a ticket.
 - Behave like a normal user: do not diagnose attacks, infer hidden SOC state, or take security actions.
+- Avoid SOC language such as triage, containment, attacker, compromise, malware, or alert unless it is user-visible text.
 - Base the decision only on your user/workflow observation.""",
 }
 
