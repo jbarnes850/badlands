@@ -2,18 +2,46 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable
 
 from openai import AsyncOpenAI
+from openai.types.responses import ResponseTextDeltaEvent
 
 from agents import Agent, Runner, RunConfig, SQLiteSession
 from agents.memory.sqlite_session import SessionSettings
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 
 from badlands.agents.llm import InvalidLLMDecision, OpenAICompatClient, REPAIR_PROMPT, _estimate_tokens
+
+
+def _stream_text_delta(event: Any) -> str:
+    if getattr(event, "type", None) != "raw_response_event":
+        return ""
+    data = getattr(event, "data", None)
+    if isinstance(data, ResponseTextDeltaEvent):
+        return data.delta or ""
+    if getattr(data, "type", None) != "response.output_text.delta":
+        return ""
+    delta = getattr(data, "delta", None)
+    return delta if isinstance(delta, str) else ""
+
+
+def _parse_partial_decision(buffer: str) -> tuple[str | None, str]:
+    action = None
+    try:
+        action_match = re.search(r'"action"\s*:\s*"([a-zA-Z0-9_]+)"', buffer)
+        if action_match:
+            action = action_match.group(1)
+        rationale_match = re.search(r'"rationale"\s*:\s*"((?:[^"\\]|\\.)*)', buffer)
+        rationale = rationale_match.group(1) if rationale_match else buffer[-240:]
+    except Exception:
+        rationale = buffer[-240:]
+    return action, rationale
 
 
 class AgentsSdkCompatClient:
@@ -50,6 +78,7 @@ class AgentsSdkCompatClient:
         self.session_hard_stop_ratio = session_hard_stop_ratio
         self.session_compaction_keep_recent_items = max(2, session_compaction_keep_recent_items)
         self.last_completion_telemetry: dict[str, Any] = {}
+        self.in_flight_dir = session_db_path.parent / "in-flight"
         session_db_path.parent.mkdir(parents=True, exist_ok=True)
         self._openai = AsyncOpenAI(base_url=self.base_url, api_key=self.api_key)
         self._sdk_model = OpenAIChatCompletionsModel(model=self.model, openai_client=self._openai)
@@ -205,25 +234,131 @@ class AgentsSdkCompatClient:
             instructions=instructions,
             model=self._sdk_model,
         )
-        result = await Runner.run(
-            agent,
-            user_input,
-            session=self._session,
-            run_config=RunConfig(
-                tracing_disabled=True,
-                workflow_name="badlands-ds29-campaign",
-                trace_id=self.trace_id,
-                group_id=self.campaign_id,
-                trace_metadata={
-                    "badlands_campaign_id": self.campaign_id,
-                    "badlands_role": self.role,
-                    "badlands_sdk_run_id": sdk_run_id,
-                    "badlands_sdk_session_id": self.session_id,
-                },
-            ),
+        run_config = RunConfig(
+            tracing_disabled=True,
+            workflow_name="badlands-ds29-campaign",
+            trace_id=self.trace_id,
+            group_id=self.campaign_id,
+            trace_metadata={
+                "badlands_campaign_id": self.campaign_id,
+                "badlands_role": self.role,
+                "badlands_sdk_run_id": sdk_run_id,
+                "badlands_sdk_session_id": self.session_id,
+            },
         )
+        partial_path = self.in_flight_dir / f"{self.role}.json"
+        started_epoch = time.time()
+        event_id = f"inflight:{self.role}:{int(started_epoch * 1000)}"
+        prompt_tokens = int(for_model.get("token_estimate") or 0) + _estimate_tokens(json.dumps(messages, sort_keys=True))
+        buffer: list[str] = []
+        last_write = 0.0
+        last_tokens = 0
+        try:
+            self._write_in_flight(
+                partial_path,
+                role=self.role,
+                episode=self._current_episode(),
+                event_id=event_id,
+                started_at_epoch=started_epoch,
+                updated_at_epoch=started_epoch,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=0,
+                partial_content="",
+            )
+            last_write = started_epoch
+            stream = Runner.run_streamed(
+                agent,
+                user_input,
+                session=self._session,
+                run_config=run_config,
+            )
+            async for event in stream.stream_events():
+                delta = _stream_text_delta(event)
+                if not delta:
+                    continue
+                buffer.append(delta)
+                content = "".join(buffer)
+                now = time.time()
+                completion_tokens = _estimate_tokens(content)
+                if now - last_write >= 0.25 or completion_tokens - last_tokens >= 32:
+                    self._write_in_flight(
+                        partial_path,
+                        role=self.role,
+                        episode=self._current_episode(),
+                        event_id=event_id,
+                        started_at_epoch=started_epoch,
+                        updated_at_epoch=now,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        partial_content=content,
+                    )
+                    last_write = now
+                    last_tokens = completion_tokens
+            raw = str(stream.final_output)
+            if raw:
+                now = time.time()
+                self._write_in_flight(
+                    partial_path,
+                    role=self.role,
+                    episode=self._current_episode(),
+                    event_id=event_id,
+                    started_at_epoch=started_epoch,
+                    updated_at_epoch=now,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=_estimate_tokens(raw),
+                    partial_content=raw,
+                )
+        finally:
+            try:
+                partial_path.unlink()
+            except FileNotFoundError:
+                pass
         after = await self._session_pressure()
-        return str(result.final_output), {"before": before, "for_model": for_model, "after": after, "compaction": compaction}
+        return raw, {"before": before, "for_model": for_model, "after": after, "compaction": compaction}
+
+    def _current_episode(self) -> int:
+        best = 0
+        for pattern in ("episode-*.jsonl", "step-*.jsonl"):
+            for path in self.session_db_path.parent.glob(pattern):
+                try:
+                    best = max(best, int(path.stem.split("-")[1]))
+                except Exception:
+                    continue
+        return best
+
+    def _write_in_flight(
+        self,
+        path: Path,
+        *,
+        role: str,
+        episode: int,
+        event_id: str,
+        started_at_epoch: float,
+        updated_at_epoch: float,
+        prompt_tokens: int,
+        completion_tokens: int,
+        partial_content: str,
+    ) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        partial_action, partial_rationale = _parse_partial_decision(partial_content)
+        payload = {
+            "role": role,
+            "episode": episode,
+            "event_id": event_id,
+            "started_at_epoch": started_at_epoch,
+            "updated_at_epoch": updated_at_epoch,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "partial_content": partial_content,
+            "partial_action": partial_action,
+            "partial_rationale": partial_rationale,
+            "in_flight": True,
+            "endpoint": self.base_url,
+            "model": self.model,
+        }
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True))
+        os.replace(tmp, path)
 
     async def _session_pressure(self) -> dict[str, Any]:
         items = await self._session.get_items(limit=None)

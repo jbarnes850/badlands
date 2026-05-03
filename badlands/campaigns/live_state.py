@@ -29,8 +29,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--interval-seconds",
         type=float,
-        default=1.0,
-        help="Polling interval for continuous mode. Default: 1.0.",
+        default=0.25,
+        help="Polling interval for continuous mode. Default: 0.25.",
     )
     parser.add_argument("--once", action="store_true", help="Write one state snapshot and exit.")
     parser.add_argument("--quiet", action="store_true", help="Suppress per-write status output.")
@@ -40,7 +40,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     if args.interval_seconds <= 0:
-        raise SystemExit("Error: --interval-seconds must be > 0\nExample: badlands-campaign-live-state --run-dir runs/my-campaign --interval-seconds 1")
+        raise SystemExit("Error: --interval-seconds must be > 0\nExample: badlands-campaign-live-state --run-dir runs/my-campaign --interval-seconds 0.25")
     run_dir = args.run_dir
     if not run_dir.exists():
         raise SystemExit(f"Error: run directory does not exist: {run_dir}\nExample: badlands-campaign-live-state --run-dir runs/my-campaign")
@@ -62,9 +62,16 @@ def main() -> None:
 def build_live_state(run_dir: Path) -> dict[str, Any]:
     base = _load_json(run_dir / "operator-state.json") or {}
     report = _load_json(run_dir / "campaign-report.json") or {}
-    tokens, invalid, repairs, actions, latest_trace, current_episode = _parse_traces(run_dir)
+    tokens, invalid, repairs, actions, latest_trace, current_episode, mission_clock = _parse_traces(run_dir)
+    in_flight = _in_flight_actions(run_dir)
+    for action in in_flight:
+        role = action.get("role")
+        if role in tokens:
+            tokens[role] += int(action.get("prompt_tokens") or 0) + int(action.get("completion_tokens") or 0)
+    tokens["total"] = sum(tokens[role] for role in ROLE_ORDER)
     started = _started_at(run_dir)
     elapsed = max(0.0, time.time() - started)
+    now = time.time()
     base.update(
         {
             "status": report.get("status", base.get("status", "running")),
@@ -78,9 +85,11 @@ def build_live_state(run_dir: Path) -> dict[str, Any]:
             "invalid_decisions": invalid,
             "repair_pressure": repairs,
             "live_partial": True,
-            "live_updated_at_epoch": round(time.time(), 3),
+            "live_updated_at_epoch": round(now, 3),
+            "live_anchor_epoch": now,
+            "mission_clock_at_anchor": mission_clock,
             "live_latest_trace": latest_trace,
-            "live_recent_actions": actions,
+            "live_recent_actions": (actions + in_flight)[-24:],
             "sdk_session_growth": _session_stats(run_dir),
         }
     )
@@ -98,18 +107,22 @@ def _load_json(path: Path) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
-def _parse_traces(run_dir: Path) -> tuple[dict[str, int], dict[str, int], dict[str, int], list[dict[str, Any]], str | None, int]:
+def _parse_traces(
+    run_dir: Path,
+) -> tuple[dict[str, int], dict[str, int], dict[str, int], list[dict[str, Any]], str | None, int, int]:
     tokens = {role: 0 for role in ROLE_ORDER}
     invalid = {role: 0 for role in ROLE_ORDER}
     repairs = {role: 0 for role in ROLE_ORDER}
     latest_actions: list[dict[str, Any]] = []
     latest_trace: str | None = None
     current_episode = 0
+    mission_clock = 0
     for trace_path in sorted(run_dir.glob("episode-*.jsonl")):
         latest_trace = str(trace_path)
         episode = _episode_from_path(trace_path)
         current_episode = max(current_episode, episode)
         for event in _iter_jsonl(trace_path):
+            mission_clock = max(mission_clock, int(event.get("timestamp") or 0))
             if event.get("type") not in {"llm_decision", "llm_decision_invalid"}:
                 continue
             role = str(event.get("agent") or "")
@@ -139,7 +152,39 @@ def _parse_traces(run_dir: Path) -> tuple[dict[str, int], dict[str, int], dict[s
                 }
             )
     tokens["total"] = sum(tokens.values())
-    return tokens, invalid, repairs, latest_actions[-24:], latest_trace, current_episode
+    return tokens, invalid, repairs, latest_actions[-24:], latest_trace, current_episode, mission_clock
+
+
+def _in_flight_actions(run_dir: Path) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    for path in sorted((run_dir / "in-flight").glob("*.json")):
+        item = _load_json(path)
+        if not item:
+            continue
+        role = str(item.get("role") or "")
+        if role not in ROLE_ORDER:
+            continue
+        actions.append(
+            {
+                "episode": int(item.get("episode") or 0),
+                "event_id": item.get("event_id") or f"inflight:{role}:{int(time.time() * 1000)}",
+                "role": role,
+                "event_type": "llm_decision_inflight",
+                "action": item.get("partial_action") or "generating",
+                "intent": "model turn in flight",
+                "rationale": item.get("partial_rationale") or item.get("partial_content") or "generating",
+                "prompt_tokens": int(item.get("prompt_tokens") or 0),
+                "completion_tokens": int(item.get("completion_tokens") or 0),
+                "latency_s": round(time.time() - float(item.get("started_at_epoch") or time.time()), 6),
+                "sdk_context": None,
+                "in_flight": True,
+                "partial_content": item.get("partial_content") or "",
+                "updated_at_epoch": item.get("updated_at_epoch"),
+                "endpoint": item.get("endpoint"),
+                "model": item.get("model"),
+            }
+        )
+    return actions
 
 
 def _iter_jsonl(path: Path) -> list[dict[str, Any]]:

@@ -1745,6 +1745,20 @@
         document.getElementById("campaign-id").textContent = "set ?state=/runs/<campaign-id>/operator-live-state.json";
       }
 
+      function updateTickers() {
+        const snapshot = window.__lastSnapshot;
+        if (!snapshot) return;
+        const updated = Number(snapshot.live_updated_at_epoch) || Number(snapshot.live_anchor_epoch) || Date.now() / 1000;
+        const deltaSec = Math.max(0, Date.now() / 1000 - updated);
+        const liveElapsed = (Number(snapshot.elapsed_seconds) || 0) + deltaSec;
+        const liveAge = Math.round(deltaSec);
+        const liveMission = Number(snapshot.mission_clock_at_anchor) || 0;
+        const budget = dur(snapshot.wall_clock_budget_seconds);
+        document.getElementById("elapsed").innerHTML = `${dur(liveElapsed)}<span class="dim" style="font-size:11px"> · ${budget}</span>`;
+        document.getElementById("live-age").textContent = `live · ${liveAge <= 1 ? "0s" : `${liveAge}s`}`;
+        document.querySelector("[data-mission-clock]").textContent = `t+${fmtNum(liveMission)}m`;
+      }
+
       async function load() {
         if (!statePath) {
           showOffline("no state");
@@ -1769,10 +1783,13 @@
         renderRoles(state);
         renderEffects(state);
         renderEvidence(state, opEvents);
+        window.__lastSnapshot = state;
+        updateTickers();
       }
 
       load();
       setInterval(load, 1000);
+      setInterval(updateTickers, 250);
     </script>
   </body>
 </html>
