@@ -312,19 +312,31 @@ def _live_actor_states(env: MissionDeskEnv, args: argparse.Namespace) -> dict[st
 
     def green_observation() -> dict[str, Any]:
         i = green_i["value"]
-        users = list(env.state.users)
+        task = env._green_workflow_task(i, {})
+        required_role = str(task.get("required_role", "mission_analyst"))
+        users = [user_id for user_id, user in env.state.users.items() if user.role == required_role] or list(env.state.users)
         user = users[i % len(users)]
         host = env.state.users[user].host_id
         return {
-            "user": {"user_id": user, "host_id": host, "role": "mission_analyst"},
-            "workflow": {"task_id": f"task-live-{i}", "history": env.state.tickets[-5:], "mission_completed": env.state.mission_completed, "mission_failed": env.state.mission_failed},
-            "mission": [{"task_id": f"task-live-{i}", "requested_action": "use_mission_app"}],
+            "user": {"user_id": user, "host_id": host, "role": env.state.users[user].role},
+            "workflow": {
+                "task_id": task["task_id"],
+                "workflow_id": task.get("workflow_id"),
+                "task_type": task.get("task_type"),
+                "deadline_at": task.get("deadline_at"),
+                "priority": task.get("priority"),
+                "history": env.state.tickets[-5:],
+                "mission_completed": env.state.mission_completed,
+                "mission_failed": env.state.mission_failed,
+            },
+            "mission": [env._public_task_context(task)],
         }
 
     def apply_green(decision: LLMDecision, decision_event_id: str) -> None:
+        i = green_i["value"]
         green_i["value"] += 1
         env.green_task(
-            green_i["value"],
+            i,
             selected_action=decision.action,
             selected_parameters=decision.parameters,
             decision_event_id=decision_event_id,

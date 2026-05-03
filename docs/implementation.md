@@ -15,7 +15,9 @@ This vertical slice implements the Mission Desk enclave contract as a small acti
 - `badlands.network.mission_app`: local contained HTTP mission service used by Docker Compose as the first real service surface.
 - `infra/docker-compose.yml`: isolated local mission app network.
 - `badlands/scenarios/mission_desk.json`: scenario-defined benign noise and
-  sensor profile for DS-20 uncertainty and observation ablations.
+  sensor profile for DS-20 uncertainty and observation ablations, plus DS-28
+  workflow tasks, user roles, deadlines, service profiles, and user-facing
+  outcomes.
 
 ## Realism anchor mapping
 
@@ -51,7 +53,25 @@ This vertical slice implements the Mission Desk enclave contract as a small acti
   mission, and security score effects. Objective artifacts are ATT&CK-shaped
   and intended for later DS-25/DS-26 calibration against Mordor/OpTC/CALDERA
   traces.
+- DS-28 mission workflow service: green work is scenario-driven rather than a
+  hardcoded demo. The active service enforces task roles, required services,
+  required files, deadlines, degraded-mode latency/failure, ticket creation,
+  and workflow outcomes. Trace-ingested service telemetry records workflow id,
+  task type, deadline/completion time, latency, degraded service ids, and role
+  context; replay scores completed/failed tasks, deadline minutes lost, ticket
+  backlog, and service downtime from evidence-bearing events. This maps to the
+  NCSC focus on operational continuity under automated response pressure and to
+  arXiv 2604.08805's modelling-gap requirement for realistic green agents,
+  observations, and reward evidence.
 
 ## Intentional limits
 
-The Docker Compose service is the first local service anchor, but the Python environment core currently drives some episode state directly for deterministic tests. This avoids premature distributed complexity while preserving trace/event/observation/scoring contracts. DS-20 noise/sensor rates and DS-22 objective durations/artifact rates are heuristic and scenario-documented; DS-25/DS-26 own stronger provenance and calibration. Next validation step: wire green actions and attacker/defender actions through the HTTP service and container logs for a larger fraction of telemetry.
+The Docker Compose service is the first local service anchor, but the Python
+environment core currently drives some episode state directly for deterministic
+tests. This avoids premature distributed complexity while preserving
+trace/event/observation/scoring contracts. DS-20 noise/sensor rates, DS-22
+objective durations/artifact rates, and DS-28 workflow/service-profile timings
+are heuristic and scenario-documented; DS-25/DS-26 own stronger provenance and
+calibration. Next validation step: wire more attacker/defender host behavior
+through service/container logs and calibrate workflow rates against mission
+source packs.

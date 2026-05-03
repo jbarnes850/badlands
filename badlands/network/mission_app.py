@@ -39,9 +39,16 @@ def _save_state(state: dict) -> None:
     STATE.write_text(json.dumps(state, sort_keys=True))
 
 
-def _initial_state(user_ids: list[str] | None = None, files: dict[str, str] | None = None) -> dict:
+def _initial_state(
+    user_ids: list[str] | None = None,
+    files: dict[str, str] | None = None,
+    *,
+    user_roles: dict[str, str] | None = None,
+    workflow_tasks: list[dict] | None = None,
+    service_profiles: dict[str, dict] | None = None,
+) -> dict:
     users = {
-        name: {"password": f"{name}-pw", "locked": False, "sessions": []}
+        name: {"password": f"{name}-pw", "locked": False, "sessions": [], "role": (user_roles or {}).get(name, "mission_analyst")}
         for name in (user_ids or DEFAULT_USERS)
     }
     return {
@@ -50,6 +57,8 @@ def _initial_state(user_ids: list[str] | None = None, files: dict[str, str] | No
         "users": users,
         "session_counter": 0,
         "files": files or {"mission.txt": "mission package"},
+        "workflow_tasks": workflow_tasks or [],
+        "service_profiles": service_profiles or {},
         "mission_tasks": [],
         "tickets": [],
         "ticket_counter": 0,
@@ -113,6 +122,34 @@ class Handler(BaseHTTPRequestHandler):
         if service_state == "degraded":
             return False, "dependency_degraded"
         return True, "available"
+
+    def _service_latency(self, state: dict, service: str) -> int:
+        profile = state.get("service_profiles", {}).get(service, {})
+        status = self._service_state(state, service)
+        key = "degraded_latency" if status == "degraded" else "base_latency"
+        return int(profile.get(key, 0))
+
+    def _degraded_mode(self, state: dict, service: str) -> str:
+        profile = state.get("service_profiles", {}).get(service, {})
+        return str(profile.get("degraded_mode", "fail"))
+
+    def _workflow_task(self, state: dict, task_id: str, fallback: dict) -> dict:
+        for task in state.get("workflow_tasks", []):
+            if str(task.get("task_id")) == task_id:
+                return dict(task)
+        return {
+            "task_id": task_id,
+            "workflow_id": fallback.get("workflow_id", "legacy-mission"),
+            "task_type": fallback.get("task_type", "use_mission_app"),
+            "requested_action": fallback.get("requested_action", "use_mission_app"),
+            "deadline_at": fallback.get("deadline_at", fallback.get("now", 0) + 10),
+            "priority": int(fallback.get("priority", 3)),
+            "required_role": fallback.get("required_role", "mission_analyst"),
+            "required_services": fallback.get("required_services", ["idp", "mission_app", "file_share"]),
+            "required_files": [fallback.get("file", "mission.txt")],
+            "success_outcome": fallback.get("success_outcome", "mission_work_completed"),
+            "failure_outcome": fallback.get("failure_outcome", "mission_blocked"),
+        }
 
     def _idp_log(self, *, user: str, host: str, service: str, action: str, outcome: str, reason: str, session_id: str | None = None) -> None:
         event = {
@@ -259,7 +296,13 @@ class Handler(BaseHTTPRequestHandler):
             body = self._json_body()
             ROOT.mkdir(exist_ok=True)
             FILES.mkdir(exist_ok=True)
-            state = _initial_state(body.get("users"), body.get("files"))
+            state = _initial_state(
+                body.get("users"),
+                body.get("files"),
+                user_roles=body.get("user_roles", {}),
+                workflow_tasks=body.get("workflow_tasks", []),
+                service_profiles=body.get("service_profiles", {}),
+            )
             state["service_states"].update(body.get("service_states", {}))
             _save_state(state)
             LOG.write_text("")
@@ -276,30 +319,70 @@ class Handler(BaseHTTPRequestHandler):
             session_id = body.get("session_id", "")
             file_name = body.get("file", "mission.txt")
             state = _state()
+            task = self._workflow_task(state, str(task_id), body)
+            workflow_id = str(task.get("workflow_id", "legacy-mission"))
+            task_type = str(task.get("task_type", "use_mission_app"))
+            required_services = [str(service) for service in task.get("required_services", ["idp", "mission_app", "file_share"])]
+            required_files = [str(name) for name in task.get("required_files", [file_name]) if name]
+            required_role = str(task.get("required_role", "mission_analyst"))
+            user_role = state.get("users", {}).get(user, {}).get("role", "mission_analyst")
+            now = int(body.get("now", 0))
+            latency = 0
+            degraded_services: list[str] = []
             if body.get("precondition_failure"):
                 reason = str(body["precondition_failure"])
                 outcome = "failure"
                 status = 409
             else:
-                ok, reason = self._service_available(state, "mission_app")
-                if ok:
+                ok, reason = True, "available"
+                if required_role and user_role != required_role:
+                    ok, reason = False, "role_mismatch"
+                for service in required_services:
+                    service_state = self._service_state(state, service)
+                    latency += self._service_latency(state, service)
+                    if service_state == "degraded":
+                        degraded_services.append(service)
+                        if self._degraded_mode(state, service) != "latency":
+                            ok, reason = False, "dependency_degraded"
+                            break
+                    if service_state == "unavailable":
+                        ok, reason = False, "dependency_unavailable"
+                        break
+                if ok and "mission_app" in required_services:
                     ok, reason = self._session_ok(user=user, host=host, service="mission_app", session_id=session_id)
-                file_ok, file_reason = self._service_available(state, "file_share")
-                if ok and not file_ok:
-                    ok, reason = False, file_reason
-                if ok and not state.get("app_available", True):
+                if ok and "mission_app" in required_services and not state.get("app_available", True):
                     ok, reason = False, "service_isolated"
-                if ok and file_name not in state.get("files", {}):
+                missing_file = next((name for name in required_files if name not in state.get("files", {})), None)
+                if ok and missing_file:
                     ok, reason = False, "file_not_found"
+                completed_at = now + latency
+                deadline_at = int(task.get("deadline_at", now + 10))
+                if ok and completed_at > deadline_at:
+                    ok, reason = False, "deadline_missed"
+                if ok and task_type == "read_write_file" and required_files:
+                    state.setdefault("files", {})[required_files[0]] = f"updated by {user} for {task_id}"
                 outcome = "success" if ok else "failure"
                 status = 200 if ok else 403
+            completed_at = int(body.get("now", 0)) + latency
+            deadline_at = int(task.get("deadline_at", int(body.get("now", 0)) + 10))
             record = {
                 "task_id": task_id,
+                "workflow_id": workflow_id,
+                "task_type": task_type,
                 "user": user,
                 "host": host,
                 "file": file_name,
                 "status": "completed" if outcome == "success" else "failed",
-                "reason": "mission_work_completed" if outcome == "success" else reason,
+                "reason": str(task.get("success_outcome", "mission_work_completed")) if outcome == "success" else reason,
+                "latency_minutes": latency,
+                "deadline_at": deadline_at,
+                "completed_at": completed_at,
+                "deadline_missed": outcome == "failure" and reason == "deadline_missed",
+                "degraded": bool(degraded_services),
+                "degraded_services": degraded_services,
+                "priority": int(task.get("priority", 3)),
+                "required_role": required_role,
+                "user_role": user_role,
             }
             state.setdefault("mission_tasks", []).append(record)
             _save_state(state)
@@ -310,7 +393,20 @@ class Handler(BaseHTTPRequestHandler):
                 service="mission_app",
                 outcome=outcome,
                 reason=record["reason"],
-                **{"badlands.task.id": task_id, "file.name": file_name},
+                **{
+                    "badlands.task.id": task_id,
+                    "badlands.workflow.id": workflow_id,
+                    "badlands.task.type": task_type,
+                    "badlands.task.priority": record["priority"],
+                    "badlands.task.deadline_at": deadline_at,
+                    "badlands.task.completed_at": completed_at,
+                    "badlands.latency.minutes": latency,
+                    "badlands.degraded": bool(degraded_services),
+                    "badlands.degraded.services": degraded_services,
+                    "badlands.required.role": required_role,
+                    "badlands.user.role": user_role,
+                    "file.name": file_name,
+                },
             )
             self.send_response(status)
             self.end_headers()
@@ -328,7 +424,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             state.setdefault("service_states", {})[service] = status
             if service == "mission_app":
-                state["app_available"] = status == "available"
+                state["app_available"] = status != "unavailable"
             _save_state(state)
             self._service_log(
                 action="service_state_changed",
@@ -524,6 +620,7 @@ class Handler(BaseHTTPRequestHandler):
                 "status": body.get("status", "open"),
                 "reason": body.get("reason", body.get("body", "")),
                 "task_id": body.get("task_id"),
+                "workflow_id": body.get("workflow_id"),
             }
             state.setdefault("tickets", []).append(ticket)
             _save_state(state)
@@ -536,7 +633,12 @@ class Handler(BaseHTTPRequestHandler):
                 service="ticket",
                 outcome="success",
                 reason=str(ticket["reason"]),
-                **{"badlands.ticket.id": ticket["ticket_id"], "badlands.task.id": ticket.get("task_id")},
+                **{
+                    "badlands.ticket.id": ticket["ticket_id"],
+                    "badlands.ticket.status": ticket["status"],
+                    "badlands.task.id": ticket.get("task_id"),
+                    "badlands.workflow.id": ticket.get("workflow_id"),
+                },
             )
             self.send_response(201)
             self.end_headers()

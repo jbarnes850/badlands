@@ -57,8 +57,10 @@ def defender_view(events: list[dict], *, now: int | None = None) -> dict:
                         "ticket_id": ecs.get("badlands.ticket.id"),
                         "user": ecs.get("user.name"),
                         "status": ecs.get("event.outcome"),
+                        "ticket_status": ecs.get("badlands.ticket.status"),
                         "reason": ecs.get("event.reason"),
                         "task_id": ecs.get("badlands.task.id"),
+                        "workflow_id": ecs.get("badlands.workflow.id"),
                         "source_event_ids": [e["event_id"]],
                     }
                 )
@@ -97,9 +99,13 @@ def green_view(events: list[dict]) -> dict:
                 {
                     "event_id": e["event_id"],
                     "task_id": e["payload"].get("task_id"),
+                    "workflow_id": e["payload"].get("workflow_id"),
+                    "task_type": _public_task_type(e["payload"].get("task_type")),
                     "status": e["payload"].get("status"),
                     "reason": e["payload"].get("reason"),
                     "ticket": e["payload"].get("ticket", False),
+                    "deadline_at": e["payload"].get("deadline_at"),
+                    "completed_at": e["payload"].get("completed_at"),
                 }
             )
         elif e["type"] == "defense_harm_event":
@@ -114,3 +120,14 @@ def green_view(events: list[dict]) -> dict:
             )
     assert_no_forbidden(obs)
     return obs
+
+
+def _public_task_type(task_type: object) -> object:
+    labels = {
+        "use_mission_app": "workflow_portal_use",
+        "read_write_file": "mission_file_update",
+        "submit_report": "mission_report_submission",
+    }
+    if not isinstance(task_type, str):
+        return task_type
+    return labels.get(task_type, task_type)

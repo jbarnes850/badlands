@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from badlands.agents.llm import AttackerLLM, InvalidLLMDecision
+from badlands.agents.llm import AttackerLLM, InvalidLLMDecision, LLMDecision
 from badlands.core.env import MissionDeskEnv
 from badlands.core.trace import load_trace
 from badlands.live_validate import (
@@ -22,6 +22,7 @@ from badlands.live_validate import (
     configured_endpoints,
     prepare_live_schedule,
     preflight,
+    _live_actor_states,
 )
 from badlands.scoring.replay import derive_scores
 
@@ -410,3 +411,42 @@ def test_live_green_apply_submits_selected_action(tmp_path: Path):
     assert completions[-1]["payload"]["action"] == "create_ticket"
     assert mission[-1]["payload"]["status"] == "failed"
     assert mission[-1]["payload"]["ticket"] is True
+
+
+def test_live_green_observation_uses_scenario_workflow(tmp_path: Path):
+    trace = tmp_path / "green-workflow.jsonl"
+    env = MissionDeskEnv(trace, seed=1)
+    env.queue.clear()
+    args = Namespace(
+        cache=tmp_path / "cache",
+        seed=1,
+        green_decisions=1,
+        attacker_decisions=0,
+        defender_decisions=0,
+        defender_first_delay=0,
+    )
+    states = _live_actor_states(env, args)
+    observation = states["green"].observe()
+    assert observation["workflow"]["task_id"] == "wf-001"
+    assert observation["workflow"]["workflow_id"] == "mission-package-cycle"
+    assert observation["workflow"]["task_type"] == "use_mission_app"
+    assert observation["user"]["role"] == "mission_analyst"
+    assert observation["mission"][0]["deadline_at"] == 8
+
+    decision = LLMDecision(
+        "report blockage",
+        "create_ticket",
+        {"reason": "blocked"},
+        0.8,
+        [],
+        "The user needs help with the assigned workflow.",
+        "Create a visible support ticket.",
+        "The mission task may remain blocked.",
+    )
+    decision_event = env.trace.emit("llm_decision", 0, decision.trace_payload("green", observation), agent="green")
+    states["green"].apply(decision, decision_event)
+    events = load_trace(trace)
+    requests = [event for event in events if event["type"] == "action_requested" and event["agent"] == "green"]
+    mission = [event for event in events if event["type"] == "mission_task_event"]
+    assert requests[-1]["parents"] == [decision_event]
+    assert mission[-1]["payload"]["task_id"] == "wf-001"

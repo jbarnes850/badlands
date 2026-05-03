@@ -44,6 +44,22 @@
   emits trace-backed telemetry and `security_impact_event` records, and replay
   scores sensitive collection, exfiltration units, service disruption, and
   overall security impact from those events.
+- Mission workflows are now scenario-driven: the default fixture defines
+  multiple workflow ids, task types, deadlines, priorities, required roles,
+  required services/files, and user-facing outcomes.
+- The active mission service resolves scenario workflow tasks, enforces role
+  and dependency requirements, records service-specific degraded-mode latency
+  or failure, and emits ECS-like telemetry with workflow/task/deadline/latency
+  fields.
+- Green observations include role-valid task context, deadlines, priority,
+  ticket history, and prior user-experienced outcomes without exposing hidden
+  dependency state or scorer truth.
+- Replay scoring now includes `deadline_minutes_lost` and
+  `ticket_backlog_count`; nonzero mission fields cite trace evidence through
+  `score_snapshot.evidence`.
+- Live validation green observations use scenario workflow tasks rather than
+  synthetic `task-live-*` placeholders, so qualitative model-output inspection
+  sees the same mission workflow surface as offline episodes.
 
 ## Intentionally incomplete
 
@@ -51,8 +67,13 @@
 - IdP and mission app currently share one local Python HTTP process. Risk: fewer deployment and network-boundary side effects than a separately deployed IdP container. Next step: split the IdP into its own compose service once this identity-state contract is stable.
 - Email is represented through ticket-like artifacts, not SMTP/IMAP. Risk: less realistic phishing/report workflow. Next step: add local MailHog-style service or stdlib mailbox endpoint.
 - Durations/rates are contract-informed constants, not yet calibrated from OpTC/LANL/CALDERA. Next step: add calibration fixtures and cite per-action sources.
-- Dependency propagation is causal for the compact Mission Desk workflow, but degraded-mode semantics are still coarse: degraded currently blocks current mission work rather than modelling latency, retry, or partial success. Next step: DS-28 for richer workflows and DS-20 for calibrated noise/sensor limits.
-- Mission task templates are scenario fields, and the active service now owns the compact file/ticket workflow. Risk: workflow richness remains limited. Next step: DS-28.
+- Degraded-mode semantics are service-specific but still heuristic. Risk:
+  workflow latency and failure modes are not calibrated to mission-owner
+  artifacts. Next step: DS-25/DS-26 provenance/calibration.
+- Mission workflows are richer but still compact. Risk: email/reporting is
+  represented by app/ticket tasks rather than full SMTP/IMAP/reporting systems.
+  Next step: add a contained email/reporting service only if required by a
+  mission source pack.
 - DS-22 attacker objective prerequisites and artifacts are ATT&CK-shaped but
   not yet statistically calibrated to Mordor/OpTC/CALDERA traces. Next step:
   DS-25/DS-26 provenance and calibration.

@@ -8,7 +8,7 @@ from typing import Any
 from badlands.core.trace import load_trace
 
 FIELDS = [
-    "mission_tasks_completed", "mission_tasks_failed", "service_downtime_minutes",
+    "mission_tasks_completed", "mission_tasks_failed", "deadline_minutes_lost", "ticket_backlog_count", "service_downtime_minutes",
     "user_lockout_minutes", "host_isolation_minutes", "benign_process_kills",
     "attacker_dwell_minutes", "persistence_minutes", "credentials_compromised_count",
     "lateral_movement_count", "sensitive_files_accessed_count", "exfiltration_units",
@@ -43,6 +43,19 @@ def derive_scores_with_evidence(events: list[dict[str, Any]]) -> tuple[dict[str,
                 _add(score, evidence, "mission_tasks_completed", event)
             if payload.get("status") == "failed":
                 _add(score, evidence, "mission_tasks_failed", event)
+            if payload.get("reason") == "deadline_missed" or int(payload.get("deadline_minutes_lost", 0) or 0) > 0:
+                amount = int(payload.get("deadline_minutes_lost", 0) or 1)
+                _add(score, evidence, "deadline_minutes_lost", event, amount)
+        elif event_type == "telemetry_emitted":
+            ecs = payload.get("ecs", {})
+            if (
+                payload.get("category") == "service"
+                and ecs.get("event.action") == "ticket_created"
+                and ecs.get("event.outcome") == "success"
+                and ecs.get("badlands.ticket.id")
+                and ecs.get("badlands.ticket.status") == "open"
+            ):
+                _add(score, evidence, "ticket_backlog_count", event)
         elif event_type == "defense_harm_event":
             _add(score, evidence, payload.get("field", "service_downtime_minutes"), event, int(payload.get("minutes", 0)))
         elif event_type == "security_impact_event":
@@ -106,6 +119,8 @@ def derive_scores_with_evidence(events: list[dict[str, Any]]) -> tuple[dict[str,
     score["overall_mission_score"] = (
         score["mission_tasks_completed"] * 10
         - score["mission_tasks_failed"] * 10
+        - score["deadline_minutes_lost"]
+        - 2 * score["ticket_backlog_count"]
         - score["user_lockout_minutes"]
         - score["host_isolation_minutes"]
         - score["service_downtime_minutes"]

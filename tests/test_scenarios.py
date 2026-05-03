@@ -27,7 +27,7 @@ def test_default_scenario_loads_deterministically():
     second = load_scenario()
     assert first == second
     assert first.scenario_id == "mission_desk_enclave"
-    assert first.green_task_schedule == [2, 8, 14, 20, 26, 32]
+    assert first.green_task_schedule == [2, 8, 14, 20, 26, 32, 44]
     assert first.auth_affinity_path.exists()
     assert {entry["taxonomy"] for entry in first.provenance}
 
@@ -70,6 +70,14 @@ def test_initial_state_is_fixture_driven(tmp_path: Path):
                 {"objective_id": "disrupt-mission-app", "type": "disruption", "service_id": "mission_app"},
             ],
         },
+        **{"mission.workflow_tasks": []},
+        **{
+            "mission.service_profiles": {
+                "mission_app": {"base_latency": 1, "degraded_latency": 6, "degraded_mode": "latency"},
+                "file_share": {"base_latency": 1, "degraded_latency": 5},
+                "idp": {"base_latency": 1, "degraded_latency": 3},
+            }
+        },
         **{"benign_noise.events": []},
     )
     state = initial_state(seed=7, scenario=scenario_path)
@@ -80,10 +88,17 @@ def test_initial_state_is_fixture_driven(tmp_path: Path):
 
 
 def test_changing_green_task_schedule_changes_trace_behavior(tmp_path: Path):
-    short_scenario = _scenario_copy(tmp_path, **{"mission.green_task_schedule": [2], "benign_noise.events": []})
+    short_scenario = _scenario_copy(
+        tmp_path,
+        **{
+            "mission.green_task_schedule": [2],
+            "mission.workflow_tasks": [],
+            "benign_noise.events": [],
+        },
+    )
     default_env = MissionDeskEnv(tmp_path / "default.jsonl", seed=7)
-    short_env = MissionDeskEnv(tmp_path / "short.jsonl", seed=7, scenario=short_scenario)
     assert default_env.run(40)["mission_tasks_completed"] == 6
+    short_env = MissionDeskEnv(tmp_path / "short.jsonl", seed=7, scenario=short_scenario)
     assert short_env.run(40)["mission_tasks_completed"] == 1
 
 
@@ -110,6 +125,15 @@ def test_scenario_loads_noise_and_sensor_profiles():
     assert {"failed_auth_burst", "noisy_script", "file_access_burst", "service_health_blip", "ticket_spike"} <= kinds
     assert scenario.sensor_model["categories"]["credential_access"]["delay"] > 0
     assert scenario.sensor_model["categories"]["network"]["drop_rate"] > 0
+
+
+def test_scenario_loads_mission_workflows_and_roles():
+    scenario = load_scenario()
+    roles = {user.get("role") for user in scenario.users}
+    task_types = {task["task_type"] for task in scenario.workflow_tasks}
+    assert {"mission_analyst", "mission_coordinator"} <= roles
+    assert {"use_mission_app", "read_write_file", "submit_report", "retry_after_failure"} <= task_types
+    assert [task["scheduled_at"] for task in scenario.workflow_tasks] == scenario.green_task_schedule
 
 
 def test_scenario_validates_dependency_references(tmp_path: Path):
@@ -162,3 +186,28 @@ def test_scenario_validates_attacker_objective_references(tmp_path: Path):
         assert "protected asset missing-file references unknown host file" in str(exc)
     else:
         raise AssertionError("invalid protected asset file was accepted")
+
+    bad_workflow = _scenario_copy(
+        tmp_path,
+        **{
+            "mission.workflow_tasks": [
+                {"task_id": "wf-ok-1", "workflow_id": "bad", "task_type": "read_write_file", "scheduled_at": 1, "deadline_at": 2, "priority": 1, "required_role": "mission_analyst", "required_services": ["idp"], "required_files": []},
+                {"task_id": "wf-ok-2", "workflow_id": "bad", "task_type": "submit_report", "scheduled_at": 2, "deadline_at": 3, "priority": 1, "required_role": "mission_coordinator", "required_services": ["idp"], "required_files": []},
+                {"task_id": "wf-bad", "workflow_id": "bad", "task_type": "use_mission_app", "scheduled_at": 4, "deadline_at": 3, "priority": 1, "required_role": "mission_analyst", "required_services": ["idp"], "required_files": []},
+            ]
+        },
+    )
+    try:
+        load_scenario(bad_workflow)
+    except ValueError as exc:
+        assert "wf-bad deadline must be at or after scheduled_at" in str(exc)
+    else:
+        raise AssertionError("invalid workflow deadline was accepted")
+
+    bad_profile = _scenario_copy(tmp_path, **{"mission.service_profiles": {"mission_app": {"degraded_mode": "teleport"}}})
+    try:
+        load_scenario(bad_profile)
+    except ValueError as exc:
+        assert "mission_app.degraded_mode must be fail or latency" in str(exc)
+    else:
+        raise AssertionError("invalid service degraded_mode was accepted")

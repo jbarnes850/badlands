@@ -131,7 +131,7 @@ def test_service_disruption_and_recovery_change_mission_outcome(tmp_path: Path):
     env.green_task(0)
     env.defender("restore_host_or_service", {"target": "file_share"})
     env.defender("restore_host_or_service", {"target": "mission_app"})
-    env.schedule(5, lambda: env.green_task(1))
+    env.schedule(5, lambda: env.green_task(6))
     score = env.run(60)
 
     assert score["mission_tasks_failed"] == 1

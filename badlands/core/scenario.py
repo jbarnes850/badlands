@@ -26,7 +26,14 @@ class Scenario:
 
     @property
     def green_task_schedule(self) -> list[int]:
+        workflow = self.workflow_tasks
+        if workflow:
+            return [int(task["scheduled_at"]) for task in workflow]
         return [int(t) for t in self.mission.get("green_task_schedule", [])]
+
+    @property
+    def workflow_tasks(self) -> list[dict[str, Any]]:
+        return [dict(task) for task in self.mission.get("workflow_tasks", [])]
 
     @property
     def host_ids(self) -> set[str]:
@@ -108,6 +115,42 @@ def validate_scenario(scenario: Scenario) -> None:
         for dependency in dependencies:
             if dependency not in host_ids and dependency not in service_ids:
                 raise ValueError(f"mission dependency {task} references unknown host/service {dependency}")
+    for service_id, profile in scenario.mission.get("service_profiles", {}).items():
+        if service_id not in service_ids:
+            raise ValueError(f"mission service profile references unknown service {service_id}")
+        for key in ("base_latency", "degraded_latency"):
+            if key in profile and int(profile[key]) < 0:
+                raise ValueError(f"mission service profile {service_id}.{key} must be non-negative")
+        if profile.get("degraded_mode", "fail") not in {"fail", "latency"}:
+            raise ValueError(f"mission service profile {service_id}.degraded_mode must be fail or latency")
+    workflow_tasks = scenario.workflow_tasks
+    if workflow_tasks:
+        task_ids: set[str] = set()
+        roles = {str(user.get("role", "mission_analyst")) for user in scenario.users}
+        if len(roles) < 2:
+            raise ValueError("mission workflow requires at least two user roles")
+        task_types = {str(task.get("task_type", "")) for task in workflow_tasks}
+        if len(task_types) < 3:
+            raise ValueError("mission workflow requires at least three task types")
+        for task in workflow_tasks:
+            task_id = str(task.get("task_id", ""))
+            if not task_id or task_id in task_ids:
+                raise ValueError("mission workflow tasks must have unique task_id values")
+            task_ids.add(task_id)
+            if not task.get("workflow_id"):
+                raise ValueError(f"mission workflow task {task_id} missing workflow_id")
+            if task.get("required_role") not in roles:
+                raise ValueError(f"mission workflow task {task_id} references unknown role")
+            if int(task.get("deadline_at", -1)) < int(task.get("scheduled_at", 0)):
+                raise ValueError(f"mission workflow task {task_id} deadline must be at or after scheduled_at")
+            if int(task.get("priority", 0)) < 1:
+                raise ValueError(f"mission workflow task {task_id} priority must be positive")
+            for service in task.get("required_services", []):
+                if service not in service_ids:
+                    raise ValueError(f"mission workflow task {task_id} references unknown service")
+            for file_name in task.get("required_files", []):
+                if not any(file_name in dict(host.get("files", {})) for host in scenario.hosts):
+                    raise ValueError(f"mission workflow task {task_id} references unknown file")
     for item in scenario.benign_noise.get("events", []):
         if item.get("host") and item["host"] not in host_ids:
             raise ValueError(f"benign noise event references unknown host {item['host']}")

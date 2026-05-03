@@ -25,6 +25,7 @@ class Host:
 class User:
     user_id: str
     host_id: str
+    role: str = "mission_analyst"
     locked: bool = False
     credentials_exposed: bool = False
 
@@ -97,4 +98,4 @@ def _user_from_fixture(data: dict[str, Any], affinities: dict[str, AuthAffinity]
     host_id = affinity.host_id if affinity is not None else str(data["primary_host"])
     if host_id != data["primary_host"]:
         raise ValueError(f"user {user_id} fixture primary_host does not match auth-affinity dataset")
-    return User(user_id, host_id, credentials_exposed=bool(data.get("credentials_exposed", False)))
+    return User(user_id, host_id, role=str(data.get("role", "mission_analyst")), credentials_exposed=bool(data.get("credentials_exposed", False)))

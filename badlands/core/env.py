@@ -114,7 +114,14 @@ class MissionDeskEnv:
             self.service_url = f"http://127.0.0.1:{self._local_service.server_port}"
         self._service_post(
             "/admin/reset_state",
-            {"users": sorted(self.scenario.user_ids), "files": self._scenario_files(), "service_states": self.dependency_graph.service_states()},
+            {
+                "users": sorted(self.scenario.user_ids),
+                "user_roles": {user["user_id"]: user.get("role", "mission_analyst") for user in self.scenario.users},
+                "files": self._scenario_files(),
+                "workflow_tasks": self.scenario.workflow_tasks,
+                "service_profiles": self.scenario.mission.get("service_profiles", {}),
+                "service_states": self.dependency_graph.service_states(),
+            },
             user="system",
         )
         self.ingest_service_logs()
@@ -522,12 +529,14 @@ class MissionDeskEnv:
     ) -> None:
         mission_service = self.scenario.mission_service_id
         mission_host = self.scenario.service_host(mission_service)
-        mission_file = self.scenario.attacker["collection_target"]
-        users = list(self.state.users)
+        task = self._green_workflow_task(i, selected_parameters or {})
+        mission_file = self._task_file(task)
+        required_role = str(task.get("required_role", "mission_analyst"))
+        users = [user_id for user_id, user in self.state.users.items() if user.role == required_role] or list(self.state.users)
         weights = [self.state.auth_affinities[u].logons for u in users]
         user = self.rng.choices(users, weights=weights, k=1)[0]
         host = self.state.users[user].host_id
-        decision_action = selected_action or "use_mission_app"
+        decision_action = selected_action or str(task.get("requested_action", task.get("task_type", "use_mission_app")))
         action_parent: str | None = None
         if selected_action is not None:
             action_parent = self._start_green_action(
@@ -537,9 +546,18 @@ class MissionDeskEnv:
             )
         if selected_action is None and self.user_simulator is not None:
             green_observation = {
-                "user": {"user_id": user, "host_id": host, "role": "mission_analyst"},
-                "workflow": {"task_id": f"task-{i}", "history": self.state.tickets[-5:], "mission_completed": self.state.mission_completed, "mission_failed": self.state.mission_failed},
-                "mission": [{"task_id": f"task-{i}", "requested_action": "use_mission_app"}],
+                "user": {"user_id": user, "host_id": host, "role": self.state.users[user].role},
+                "workflow": {
+                    "task_id": task["task_id"],
+                    "workflow_id": task.get("workflow_id"),
+                    "task_type": task.get("task_type"),
+                    "deadline_at": task.get("deadline_at"),
+                    "priority": task.get("priority"),
+                    "history": self.state.tickets[-5:],
+                    "mission_completed": self.state.mission_completed,
+                    "mission_failed": self.state.mission_failed,
+                },
+                "mission": [self._public_task_context(task)],
             }
             try:
                 decision = self.user_simulator.decide(green_observation)
@@ -547,37 +565,39 @@ class MissionDeskEnv:
                 decision_action = decision.action
             except InvalidLLMDecision as exc:
                 self._emit_invalid_llm("green", exc, green_observation)
-                self._fail_green_task(i, user, host, "invalid_green_decision", [])
+                self._fail_green_task(i, user, host, "invalid_green_decision", [], task=task)
                 return
         if decision_action == "create_ticket":
-            self._fail_green_task(i, user, host, "green_created_ticket", [])
+            self._fail_green_task(i, user, host, "green_created_ticket", [], task=task)
             self._complete_green_action(action_parent, decision_action, True, "ticket_created")
             return
         if self.state.hosts[host].isolated or self.state.hosts[mission_host].isolated:
-            self._fail_green_task(i, user, host, "defensive_or_service_disruption", [])
+            self._fail_green_task(i, user, host, "defensive_or_service_disruption", [], task=task)
             self._complete_green_action(action_parent, decision_action, False, "defensive_or_service_disruption")
             return
         login = self._idp_login(user, host)
         evidence = login["events"]
         if not login["ok"]:
-            self._fail_green_task(i, user, host, login["reason"], evidence)
+            self._fail_green_task(i, user, host, login["reason"], evidence, task=task)
             self._complete_green_action(action_parent, decision_action, False, login["reason"])
             return
         session_id = login["session_id"]
-        validate = self._idp_validate(user, host, session_id, mission_service)
-        evidence.extend(validate["events"])
-        if not validate["ok"]:
-            self._fail_green_task(i, user, host, validate["reason"], evidence)
-            self._complete_green_action(action_parent, decision_action, False, validate["reason"])
-            return
-        file_status = self._service_get(f"/file/{mission_file}", user=user, host=host, session_id=session_id)
-        evidence.extend(self.ingest_service_logs())
+        if mission_service in task.get("required_services", []):
+            validate = self._idp_validate(user, host, session_id, mission_service)
+            evidence.extend(validate["events"])
+            if not validate["ok"]:
+                self._fail_green_task(i, user, host, validate["reason"], evidence, task=task)
+                self._complete_green_action(action_parent, decision_action, False, validate["reason"])
+                return
+        file_status = 200
+        if mission_file and decision_action in {"use_mission_app", "read_write_file"} and mission_file in task.get("required_files", []):
+            file_status = self._service_get(f"/file/{mission_file}", user=user, host=host, session_id=session_id)
+            evidence.extend(self.ingest_service_logs())
         status, body, mission_events = self._mission_task(
-            task_id=f"task-{i}",
+            task=task,
             user=user,
             host=host,
             session_id=session_id,
-            mission_file=mission_file,
         )
         evidence.extend(mission_events)
         if file_status >= 400 or status >= 400 or not body.get("ok"):
@@ -587,6 +607,8 @@ class MissionDeskEnv:
                 host,
                 body.get("reason", "mission_app_auth_failed"),
                 evidence,
+                task=task,
+                service_body=body,
                 mission_recorded=True,
             )
             self._complete_green_action(action_parent, decision_action, False, body.get("reason", "mission_app_auth_failed"))
@@ -596,10 +618,17 @@ class MissionDeskEnv:
             "mission_task_event",
             self.now,
             {
-                "task_id": f"task-{i}",
+                "task_id": task["task_id"],
+                "workflow_id": body.get("workflow_id"),
+                "task_type": body.get("task_type"),
                 "user": user,
                 "status": "completed",
                 "dependency": mission_service,
+                "deadline_at": body.get("deadline_at"),
+                "completed_at": body.get("completed_at"),
+                "latency_minutes": body.get("latency_minutes", 0),
+                "priority": body.get("priority"),
+                "user_role": self.state.users[user].role,
                 "source_event_ids": evidence,
                 "service_authority": "mission_app",
             },
@@ -638,29 +667,44 @@ class MissionDeskEnv:
         reason: str,
         evidence: list[str],
         *,
+        task: dict[str, Any] | None = None,
+        service_body: dict[str, Any] | None = None,
         mission_recorded: bool = False,
     ) -> None:
-        task_id = f"task-{i}"
+        task = task or self._green_workflow_task(i, {})
+        task_id = str(task["task_id"])
         status = 409
         mission_events: list[str] = []
         if not mission_recorded:
             status, _, mission_events = self._mission_task(
-                task_id=task_id,
+                task=task,
                 user=user,
                 host=host,
                 session_id=self.idp_sessions.get(user, ""),
-                mission_file=self.scenario.attacker["collection_target"],
                 precondition_failure=reason,
             )
         evidence = [*evidence, *mission_events]
-        ticket = self._create_ticket(user=user, host=host, task_id=task_id, reason=reason)
+        ticket = self._create_ticket(user=user, host=host, task_id=task_id, reason=reason, workflow_id=str(task.get("workflow_id", "")))
         evidence.extend(ticket["events"])
         payload = {
             "task_id": task_id,
+            "workflow_id": task.get("workflow_id"),
+            "task_type": task.get("task_type"),
             "user": user,
             "status": "failed",
             "reason": reason if status >= 400 else "mission_failed",
             "ticket": bool(ticket["ok"]),
+            "deadline_at": (service_body or {}).get("deadline_at", task.get("deadline_at")),
+            "completed_at": (service_body or {}).get("completed_at", self.now),
+            "latency_minutes": (service_body or {}).get("latency_minutes", 0),
+            "deadline_minutes_lost": max(
+                0,
+                int((service_body or {}).get("completed_at", self.now)) - int((service_body or {}).get("deadline_at", task.get("deadline_at", self.now))),
+            )
+            if reason == "deadline_missed"
+            else 0,
+            "priority": task.get("priority"),
+            "user_role": self.state.users[user].role if user in self.state.users else None,
             "source_event_ids": evidence,
             "service_authority": "mission_app",
         }
@@ -675,26 +719,70 @@ class MissionDeskEnv:
                 parents=evidence,
             )
 
+    def _green_workflow_task(self, i: int, params: dict[str, Any]) -> dict[str, Any]:
+        tasks = self.scenario.workflow_tasks
+        task_id = params.get("task_id")
+        if task_id:
+            for task in tasks:
+                if task.get("task_id") == task_id:
+                    return dict(task)
+        if tasks:
+            return dict(tasks[i % len(tasks)])
+        return {
+            "task_id": f"task-{i}",
+            "workflow_id": "legacy-mission",
+            "task_type": "use_mission_app",
+            "requested_action": "use_mission_app",
+            "deadline_at": self.now + 10,
+            "priority": 3,
+            "required_role": "mission_analyst",
+            "required_services": ["idp", "mission_app", "file_share"],
+            "required_files": [self.scenario.attacker["collection_target"]],
+        }
+
+    def _task_file(self, task: dict[str, Any]) -> str:
+        files = task.get("required_files", [])
+        return str(files[0]) if files else self.scenario.attacker["collection_target"]
+
+    def _public_task_context(self, task: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "task_id": task.get("task_id"),
+            "workflow_id": task.get("workflow_id"),
+            "task_type": task.get("task_type"),
+            "requested_action": task.get("requested_action", task.get("task_type")),
+            "deadline_at": task.get("deadline_at"),
+            "priority": task.get("priority"),
+            "required_role": task.get("required_role"),
+        }
+
     def _mission_task(
         self,
         *,
-        task_id: str,
+        task: dict[str, Any],
         user: str,
         host: str,
         session_id: str,
-        mission_file: str,
         precondition_failure: str | None = None,
     ) -> tuple[int, dict[str, Any], list[str]]:
-        payload = {"task_id": task_id, "host": host, "session_id": session_id, "file": mission_file}
+        payload = {
+            "task_id": task["task_id"],
+            "workflow_id": task.get("workflow_id"),
+            "task_type": task.get("task_type"),
+            "requested_action": task.get("requested_action", task.get("task_type")),
+            "host": host,
+            "session_id": session_id,
+            "file": self._task_file(task),
+            "now": self.now,
+        }
         if precondition_failure:
             payload["precondition_failure"] = precondition_failure
         status, body, events = self._service_post_with_events("/mission/task", payload, user=user)
         return status, body, events
 
-    def _create_ticket(self, *, user: str, host: str, task_id: str, reason: str) -> dict[str, Any]:
+    def _create_ticket(self, *, user: str, host: str, task_id: str, reason: str, workflow_id: str | None = None) -> dict[str, Any]:
         status, body, events = self._service_post_with_events(
             "/ticket",
-            {"host": host, "task_id": task_id, "body": reason, "reason": reason},
+            {"host": host, "task_id": task_id, "workflow_id": workflow_id, "body": reason, "reason": reason},
             user=user,
         )
         return {"ok": status == 201 and body.get("ok"), "ticket": body, "events": events}
