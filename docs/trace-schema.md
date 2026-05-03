@@ -82,3 +82,14 @@ current role, current campaign step, a memory summary, a current-trace event id,
 and upstream source trace/event ids. Actors cite the current-trace memory event
 id; reviewers can follow that event back to the prior step trace. Replay does
 not read SDK sessions or campaign reports.
+
+DS-30 campaign compaction also uses `state_transition`. When role memory
+pressure crosses the compaction threshold, the harness emits
+`kind=campaign_memory_compacted` with role, campaign step, compaction mode,
+token before/after, pressure before/after, context limit, threshold ratios,
+compacted fact count, preserved head/recent counts, compacted summary, and
+upstream source event ids. The compacted summary is actor-visible only through
+later `campaign_memory_visible` events and remains replay-audit evidence, not
+canonical scoring state. Upstream source event ids may point into prior step
+traces, so they are carried in payload fields rather than current-trace
+`parents`.

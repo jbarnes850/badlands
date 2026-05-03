@@ -48,6 +48,22 @@ from that role's step-1 `llm_decision` observation and visible evidence ids.
 Hidden state, scorer evidence, future schedules, privileged service truth, and
 cross-role decisions are rejected before memory is injected.
 
+DS-30 adds Badlands-owned context compaction for this campaign memory path.
+The harness estimates role memory pressure against the advertised/effective
+served context recorded for that role, warns near 70%, compacts near 85%, and
+hard-stops near 95% if role-visible memory cannot be reduced safely. Compaction
+preserves configured head and recent facts verbatim, deterministically
+summarizes only older middle facts, and carries upstream source event ids on
+each compacted fact. SDK session internals, cache contents, scorer truth,
+hidden labels, future schedules, privileged service truth, and cross-role
+decisions remain forbidden compaction inputs.
+
+Long-term continuity comes from Badlands JSONL campaign memory, not unbounded
+SDK transcript growth. Direct SDK runs use a bounded SDK session tail by default
+and record `sdk_session_strategy` in the campaign report. This keeps recent
+conversation mechanics available to the SDK while older continuity is carried
+through trace-linked campaign memory and compaction summaries.
+
 This is the first Badlands surface where cross-episode campaign memory exists.
 It does not permit prompt self-modification, scaffold mutation, arbitrary host
 tools, unsafe offensive capability, agent-authored scenario changes, or custom
@@ -98,7 +114,10 @@ uv run badlands-replay runs/ds29-live-campaign/step-2.jsonl
 The harness writes `campaign-report.json` under `--out`. Reviewer-ready fields:
 
 - `campaign_id`, `harness_version`, `sdk_mode`, `memory_mode`;
+- `compaction_mode`, compaction thresholds, compaction counts/events, and
+  per-role token pressure before/after compaction;
 - `sdk_session_ids` and `sdk_session_db`;
+- `sdk_session_strategy` with the bounded SDK tail item limit;
 - endpoint `preflight` for direct SDK mode;
 - per-step trace path, replay status, score, decisions, and decision-quality
   summary;

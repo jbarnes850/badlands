@@ -5,6 +5,12 @@ from typing import Any
 
 
 FORBIDDEN_MEMORY_KEYS = {
+    "audit_true_positive",
+    "cache_contents",
+    "cache_key",
+    "cache_path",
+    "cross-role",
+    "cross_role",
     "score",
     "score_snapshot",
     "scorer",
@@ -13,8 +19,14 @@ FORBIDDEN_MEMORY_KEYS = {
     "host_compromised",
     "objective_state",
     "future_schedule",
+    "future_schedules",
+    "hidden_label",
+    "hidden_labels",
     "attacker_location",
     "privileged_service_truth",
+    "sdk_session",
+    "sdk_session_db",
+    "session_internals",
 }
 
 
@@ -27,6 +39,8 @@ class MemoryFact:
     action: str | None = None
     decision_event_id: str | None = None
     source_trace_path: str | None = None
+    compacted: bool = False
+    compacted_from_event_ids: list[str] = field(default_factory=list)
 
     def as_observation_item(self) -> dict[str, Any]:
         return {
@@ -37,6 +51,8 @@ class MemoryFact:
             "action": self.action,
             "decision_event_id": self.decision_event_id,
             "source_trace_path": self.source_trace_path,
+            "compacted": self.compacted,
+            "compacted_from_event_ids": self.compacted_from_event_ids,
         }
 
 

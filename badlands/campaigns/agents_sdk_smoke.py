@@ -9,6 +9,13 @@ from typing import Any
 
 from badlands.agents.agents_sdk import AgentsSdkCompatClient
 from badlands.agents.campaign_memory import CampaignMemoryStore, add_campaign_memory, memory_fact_from_decision
+from badlands.agents.context_compaction import (
+    DEFAULT_CONTEXT_TOKENS,
+    CampaignMemoryCompaction,
+    CompactionThresholds,
+    RoleTokenPressure,
+    compact_role_campaign_memory,
+)
 from badlands.agents.decision_quality import decision_quality_report
 from badlands.agents.llm import AttackerLLM, DefenderLLM, GreenUserLLM, InvalidLLMDecision, LLMDecision
 from badlands.core.attacker_actions import ATTACKER_ACTION_DURATIONS
@@ -100,6 +107,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--service-url")
     parser.add_argument("--chat-timeout", type=int, default=int(os.getenv("BADLANDS_LLM_TIMEOUT_SECONDS", "240")))
     parser.add_argument("--sdk-mode", choices=("direct", "adapter"), default="direct")
+    parser.add_argument("--context-tokens", type=int, default=DEFAULT_CONTEXT_TOKENS)
+    parser.add_argument("--context-warning-ratio", type=float, default=0.70)
+    parser.add_argument("--context-compaction-ratio", type=float, default=0.85)
+    parser.add_argument("--context-hard-stop-ratio", type=float, default=0.95)
+    parser.add_argument("--compaction-preserve-head", type=int, default=1)
+    parser.add_argument("--compaction-preserve-recent", type=int, default=2)
+    parser.add_argument("--sdk-session-item-limit", type=int, default=12)
     parser.add_argument("--quiet", action="store_true")
     for role in ROLE_ORDER:
         parser.add_argument(f"--{role}-base-url")
@@ -121,10 +135,27 @@ def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
     campaign_id = f"ds29-seed-{args.seed}-{int(time.time())}"
     endpoints = configured_endpoints(args)
     preflight_results = [] if args.sdk_mode == "adapter" else preflight(endpoints, chat_timeout=args.chat_timeout)
+    thresholds = CompactionThresholds(
+        warning_ratio=getattr(args, "context_warning_ratio", 0.70),
+        compaction_ratio=getattr(args, "context_compaction_ratio", 0.85),
+        hard_stop_ratio=getattr(args, "context_hard_stop_ratio", 0.95),
+    )
+    advertised_context_tokens_by_role = _context_by_role(
+        preflight_results,
+        "advertised_context_tokens",
+        default=getattr(args, "context_tokens", DEFAULT_CONTEXT_TOKENS),
+    )
+    served_context_tokens_by_role = _context_by_role(
+        preflight_results,
+        "served_context_tokens",
+        default=getattr(args, "context_tokens", DEFAULT_CONTEXT_TOKENS),
+    )
     sessions = _session_ids(campaign_id)
     session_db = args.out / "agents-sdk-sessions.sqlite"
     actors = _actors(args, endpoints, sessions, session_db, campaign_id)
     memory = CampaignMemoryStore()
+    compactions: list[CampaignMemoryCompaction] = []
+    token_pressure_by_role: dict[str, dict[str, Any]] = {}
     steps: list[dict[str, Any]] = []
     memory_effects: list[dict[str, Any]] = []
     started = time.perf_counter()
@@ -144,7 +175,19 @@ def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
                 "sdk_mode": "direct_sdk" if args.sdk_mode == "direct" else "adapter_fallback",
             },
         )
-        decisions = _run_step(env, actors, memory, step)
+        decisions, step_pressure = _run_step(
+            env,
+            actors,
+            memory,
+            step,
+            thresholds=thresholds,
+            advertised_context_tokens_by_role=advertised_context_tokens_by_role,
+            served_context_tokens_by_role=served_context_tokens_by_role,
+            compactions=compactions,
+            preserve_head=getattr(args, "compaction_preserve_head", 1),
+            preserve_recent=getattr(args, "compaction_preserve_recent", 2),
+        )
+        token_pressure_by_role.update(step_pressure)
         env.run(args.until)
         replay_score = derive_scores(load_trace(trace_path))
         trace_events = load_trace(trace_path)
@@ -177,6 +220,7 @@ def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
                 "score": score,
                 "sdk_session_ids": sessions,
                 "decisions": decisions,
+                "token_pressure_by_role": step_pressure,
                 "decision_quality": decision_quality_report(trace_events),
             }
         )
@@ -187,16 +231,38 @@ def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
         "harness_version": HARNESS_VERSION,
         "sdk_mode": "direct_sdk" if args.sdk_mode == "direct" else "adapter_fallback",
         "memory_mode": "campaign",
+        "compaction_mode": "evidence-preserving-summary",
+        "compaction_thresholds": thresholds.as_dict(),
+        "compaction": {
+            "mode": "evidence-preserving-summary",
+            "count": len(compactions),
+            "by_role": {
+                role: {
+                    "count": sum(1 for item in compactions if item.role == role),
+                    "token_before": [item.token_before for item in compactions if item.role == role],
+                    "token_after": [item.token_after for item in compactions if item.role == role],
+                    "event_ids": [item.trace_event_id for item in compactions if item.role == role],
+                }
+                for role in ROLE_ORDER
+            },
+            "events": [item.as_report() for item in compactions],
+        },
+        "token_pressure_by_role": token_pressure_by_role,
         "seed": args.seed,
         "until": args.until,
         "report_path": str(report_path),
         "cache_path": str(args.out / "cache"),
         "sdk_session_db": str(session_db),
         "sdk_session_ids": sessions,
+        "sdk_session_strategy": {
+            "mode": "bounded_tail_plus_campaign_memory_compaction",
+            "item_limit": getattr(args, "sdk_session_item_limit", 12),
+            "long_term_memory_source": "Badlands JSONL campaign memory",
+        },
         "preflight": preflight_results,
-        "advertised_context_tokens_by_role": _preflight_by_role(preflight_results, "advertised_context_tokens"),
-        "served_context_tokens_by_role": _preflight_by_role(preflight_results, "served_context_tokens"),
-        "served_context_evidence_by_role": _preflight_by_role(preflight_results, "served_context_evidence"),
+        "advertised_context_tokens_by_role": advertised_context_tokens_by_role,
+        "served_context_tokens_by_role": served_context_tokens_by_role,
+        "served_context_evidence_by_role": _context_evidence_by_role(preflight_results, default="campaign harness default"),
         "steps": steps,
         "role_memory": {role: [fact.as_observation_item() for fact in facts] for role, facts in memory.facts.items()},
         "step2_memory_effects": memory_effects,
@@ -225,6 +291,16 @@ def _preflight_by_role(preflight_results: list[dict[str, Any]], key: str) -> dic
     return {item["role"]: item.get(key) for item in preflight_results}
 
 
+def _context_by_role(preflight_results: list[dict[str, Any]], key: str, *, default: int) -> dict[str, int]:
+    values = _preflight_by_role(preflight_results, key)
+    return {role: int(values.get(role) or default) for role in ROLE_ORDER}
+
+
+def _context_evidence_by_role(preflight_results: list[dict[str, Any]], *, default: str) -> dict[str, str]:
+    values = _preflight_by_role(preflight_results, "served_context_evidence")
+    return {role: str(values.get(role) or default) for role in ROLE_ORDER}
+
+
 def _actors(
     args: argparse.Namespace,
     endpoints: dict[str, RoleEndpoint],
@@ -249,6 +325,7 @@ def _actors(
                 session_db_path=session_db,
                 campaign_id=campaign_id,
                 trace_id=f"trace-{campaign_id}-{role}",
+                session_item_limit=getattr(args, "sdk_session_item_limit", 12),
             )
         actors[role] = actor_cls(cache_dir=cache_dir, seed=args.seed, client=client, model=client.model)
     return actors
@@ -259,17 +336,40 @@ def _run_step(
     actors: dict[str, Any],
     memory: CampaignMemoryStore,
     step: int,
-) -> list[dict[str, Any]]:
+    *,
+    thresholds: CompactionThresholds,
+    advertised_context_tokens_by_role: dict[str, int],
+    served_context_tokens_by_role: dict[str, int],
+    compactions: list[CampaignMemoryCompaction],
+    preserve_head: int,
+    preserve_recent: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     env.run(0)
-    visible_memory = {role: _emit_visible_memory(env, memory, role, step) for role in ROLE_ORDER}
     observations = {
         "green": _green_observation(env, 0),
         "attacker": attacker_view(env.trace.events),
         "defender": env.defender_observation(),
     }
     decisions: list[dict[str, Any]] = []
+    pressure_by_role: dict[str, Any] = {}
     for role in ROLE_ORDER:
-        observation = add_campaign_memory(observations[role], visible_memory[role])
+        before_pressure, after_pressure = _compact_if_needed(
+            env,
+            memory,
+            role,
+            step,
+            context_limit=int(served_context_tokens_by_role.get(role) or advertised_context_tokens_by_role.get(role) or DEFAULT_CONTEXT_TOKENS),
+            thresholds=thresholds,
+            compactions=compactions,
+            preserve_head=preserve_head,
+            preserve_recent=preserve_recent,
+        )
+        pressure_by_role[role] = {
+            "before": before_pressure.as_report(),
+            "after": after_pressure.as_report(),
+        }
+        visible_memory = _emit_visible_memory(env, memory, role, step)
+        observation = add_campaign_memory(observations[role], visible_memory)
         try:
             decision = actors[role].decide(observation)
         except InvalidLLMDecision as exc:
@@ -290,7 +390,55 @@ def _run_step(
         event_id = env.trace.emit("llm_decision", env.now, decision.trace_payload(role, observation), agent=role, parents=decision.evidence_ids)
         _apply_decision(env, role, decision, event_id)
         decisions.append({"role": role, "status": "valid", "event_id": event_id, "action": decision.action})
-    return decisions
+    return decisions, pressure_by_role
+
+
+def _compact_if_needed(
+    env: MissionDeskEnv,
+    memory: CampaignMemoryStore,
+    role: str,
+    step: int,
+    *,
+    context_limit: int,
+    thresholds: CompactionThresholds,
+    compactions: list[CampaignMemoryCompaction],
+    preserve_head: int,
+    preserve_recent: int,
+) -> tuple[RoleTokenPressure, RoleTokenPressure]:
+    before, after, record = compact_role_campaign_memory(
+        memory,
+        role,
+        step=step,
+        context_limit=context_limit,
+        thresholds=thresholds,
+        preserve_head=preserve_head,
+        preserve_recent=preserve_recent,
+    )
+    if record is not None:
+        record.trace_event_id = env.trace.emit(
+            "state_transition",
+            env.now,
+            {
+                "kind": "campaign_memory_compacted",
+                "campaign_step": step,
+                "role": role,
+                "compaction_mode": record.compaction_mode,
+                "token_before": record.token_before,
+                "token_after": record.token_after,
+                "pressure_before": record.pressure_before,
+                "pressure_after": record.pressure_after,
+                "context_limit": record.context_limit,
+                "compacted_fact_count": record.compacted_fact_count,
+                "preserved_head_count": record.preserved_head_count,
+                "preserved_recent_count": record.preserved_recent_count,
+                "upstream_source_event_ids": record.source_event_ids,
+                "summary": record.compacted_summary,
+                "thresholds": thresholds.as_dict(),
+            },
+            agent=role,
+        )
+        compactions.append(record)
+    return before, after
 
 
 def _emit_visible_memory(

@@ -10,6 +10,7 @@ from typing import Any, Callable
 from openai import AsyncOpenAI
 
 from agents import Agent, Runner, RunConfig, SQLiteSession
+from agents.memory.sqlite_session import SessionSettings
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 
 from badlands.agents.llm import InvalidLLMDecision, OpenAICompatClient, REPAIR_PROMPT, _estimate_tokens
@@ -29,6 +30,7 @@ class AgentsSdkCompatClient:
         session_db_path: Path,
         campaign_id: str,
         trace_id: str | None = None,
+        session_item_limit: int | None = None,
     ):
         self.role = role
         self.base_url = base_url.rstrip("/")
@@ -38,11 +40,16 @@ class AgentsSdkCompatClient:
         self.session_db_path = session_db_path
         self.campaign_id = campaign_id
         self.trace_id = trace_id
+        self.session_item_limit = session_item_limit
         self.last_completion_telemetry: dict[str, Any] = {}
         session_db_path.parent.mkdir(parents=True, exist_ok=True)
         self._openai = AsyncOpenAI(base_url=self.base_url, api_key=self.api_key)
         self._sdk_model = OpenAIChatCompletionsModel(model=self.model, openai_client=self._openai)
-        self._session = SQLiteSession(session_id, db_path=str(session_db_path))
+        self._session = SQLiteSession(
+            session_id,
+            db_path=str(session_db_path),
+            session_settings=SessionSettings(limit=session_item_limit),
+        )
 
     def complete_json(
         self,
@@ -70,6 +77,7 @@ class AgentsSdkCompatClient:
             "sdk_run_id": None,
             "sdk_session_id": self.session_id,
             "sdk_session_db": str(self.session_db_path),
+            "sdk_session_item_limit": self.session_item_limit,
             "sdk_trace_group_id": self.campaign_id,
             "attempt_count": 0,
             "repair_count": 0,

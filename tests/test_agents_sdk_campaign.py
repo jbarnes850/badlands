@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from badlands.agents.campaign_memory import CampaignMemoryStore, MemoryFact, assert_no_forbidden_memory, memory_fact_from_decision
-from badlands.campaigns.agents_sdk_smoke import run_campaign
+from badlands.agents.context_compaction import CompactionThresholds, compact_role_campaign_memory
+from badlands.campaigns.agents_sdk_smoke import _compact_if_needed, run_campaign
+from badlands.core.env import MissionDeskEnv
 from badlands.core.trace import load_trace
 from badlands.scoring.replay import derive_scores
 
@@ -41,6 +43,14 @@ def test_adapter_campaign_replay_and_memory_effects(tmp_path: Path) -> None:
     assert set(report["sdk_session_ids"]) == {"green", "attacker", "defender"}
     assert len(set(report["sdk_session_ids"].values())) == 3
     assert {effect["role"] for effect in report["step2_memory_effects"]} == {"green", "attacker", "defender"}
+    assert report["compaction_mode"] == "evidence-preserving-summary"
+    assert set(report["token_pressure_by_role"]) == {"green", "attacker", "defender"}
+    assert report["compaction"]["count"] == 0
+    assert report["sdk_session_strategy"] == {
+        "mode": "bounded_tail_plus_campaign_memory_compaction",
+        "item_limit": 12,
+        "long_term_memory_source": "Badlands JSONL campaign memory",
+    }
 
     step2 = load_trace(tmp_path / "step-2.jsonl")
     assert derive_scores(step2) == report["steps"][1]["replay_score"]
@@ -98,6 +108,89 @@ def test_campaign_memory_is_role_isolated() -> None:
     assert "Defender" not in json.dumps(attacker_memory)
 
 
+def test_campaign_memory_compaction_preserves_sources_and_recent_facts() -> None:
+    store = CampaignMemoryStore()
+    for idx in range(6):
+        store.add(
+            MemoryFact(
+                role="defender",
+                visible_at_step=2,
+                source_event_ids=[f"evt_00010{idx}"],
+                summary=f"Visible defender decision {idx} gathered endpoint evidence for host ws-{idx}.",
+                action="query_endpoint",
+                decision_event_id=f"evt_00020{idx}",
+                source_trace_path=f"runs/prior-{idx}.jsonl",
+            )
+        )
+    thresholds = CompactionThresholds(warning_ratio=0.20, compaction_ratio=0.30, hard_stop_ratio=0.99)
+    before, after, record = compact_role_campaign_memory(
+        store,
+        "defender",
+        step=2,
+        context_limit=700,
+        thresholds=thresholds,
+        preserve_head=1,
+        preserve_recent=2,
+    )
+
+    assert record is not None
+    assert before.pressure >= thresholds.compaction_ratio
+    assert after.token_estimate < before.token_estimate
+    assert record.compacted_fact_count == 3
+    assert record.source_event_ids == ["evt_000101", "evt_000102", "evt_000103"]
+    visible = store.observation_memory("defender", step=2)["facts"]
+    assert visible[0]["summary"] == "Visible defender decision 0 gathered endpoint evidence for host ws-0."
+    assert visible[-1]["summary"] == "Visible defender decision 5 gathered endpoint evidence for host ws-5."
+    compacted = [fact for fact in visible if fact["compacted"]]
+    assert len(compacted) == 1
+    assert compacted[0]["source_event_ids"] == record.source_event_ids
+
+
+def test_campaign_compaction_emits_trace_state_transition(tmp_path: Path) -> None:
+    env = MissionDeskEnv(tmp_path / "trace.jsonl", seed=7)
+    store = CampaignMemoryStore()
+    for idx in range(5):
+        store.add(
+            MemoryFact(
+                role="attacker",
+                visible_at_step=2,
+                source_event_ids=[f"evt_00030{idx}"],
+                summary=f"Visible attacker decision {idx} found a role-valid network artifact.",
+                action="scan_network",
+                decision_event_id=f"evt_00040{idx}",
+            )
+        )
+    compactions = []
+    _compact_if_needed(
+        env,
+        store,
+        "attacker",
+        2,
+        context_limit=600,
+        thresholds=CompactionThresholds(warning_ratio=0.20, compaction_ratio=0.30, hard_stop_ratio=0.99),
+        compactions=compactions,
+        preserve_head=1,
+        preserve_recent=1,
+    )
+
+    trace = load_trace(tmp_path / "trace.jsonl")
+    events = [event for event in trace if event["payload"].get("kind") == "campaign_memory_compacted"]
+    assert len(events) == 1
+    assert events[0]["parents"] == []
+    assert compactions[0].trace_event_id == events[0]["event_id"]
+    assert events[0]["payload"]["upstream_source_event_ids"] == compactions[0].source_event_ids
+
+
 def test_forbidden_memory_text_is_rejected() -> None:
     with pytest.raises(ValueError, match="forbidden memory text"):
         assert_no_forbidden_memory({"summary": "This says host_compromised directly."})
+
+
+@pytest.mark.parametrize("term", ["sdk_session_db", "cache_path", "hidden_label", "cross_role"])
+def test_compaction_forbidden_terms_are_rejected(term: str) -> None:
+    with pytest.raises(ValueError):
+        assert_no_forbidden_memory({"summary": f"do not carry {term} forward"})
+
+
+def test_role_visible_cache_named_artifact_is_not_rejected() -> None:
+    assert_no_forbidden_memory({"summary": "Analyst reviewed mission-cache-refresh process telemetry."})
