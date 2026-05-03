@@ -93,11 +93,14 @@ def preflight(endpoints: dict[str, RoleEndpoint], *, chat_timeout: int) -> list[
             status, models, latency = _http_json(f"{cfg.base_url}/models", api_key=cfg.api_key, timeout=min(chat_timeout, 30))
         except (OSError, urllib.error.URLError, TimeoutError) as exc:
             raise EndpointFailure(cfg.role, cfg.base_url, "/v1/models", str(exc)) from exc
-        model_ids = [str(item.get("id")) for item in models.get("data", []) if isinstance(item, dict)]
+        model_items = [item for item in models.get("data", []) if isinstance(item, dict)]
+        model_ids = [str(item.get("id")) for item in model_items]
         if status != 200:
             raise EndpointFailure(cfg.role, cfg.base_url, "/v1/models", f"HTTP {status}")
         if cfg.model not in model_ids:
             raise EndpointFailure(cfg.role, cfg.base_url, "configured model id", f"{cfg.model!r} not in {model_ids!r}")
+        configured_model = next(item for item in model_items if str(item.get("id")) == cfg.model)
+        max_model_len = configured_model.get("max_model_len")
         chat_body = {
             "model": cfg.model,
             "messages": [
@@ -167,6 +170,9 @@ def preflight(endpoints: dict[str, RoleEndpoint], *, chat_timeout: int) -> list[
                 "prompt_tokens": usage.get("prompt_tokens"),
                 "completion_tokens": usage.get("completion_tokens"),
                 "available_model_count": len(model_ids),
+                "advertised_context_tokens": max_model_len,
+                "served_context_tokens": max_model_len,
+                "served_context_evidence": "/v1/models max_model_len",
                 "backpressure": backpressure,
             }
         )

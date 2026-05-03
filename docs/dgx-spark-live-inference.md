@@ -207,3 +207,37 @@ does not include prompt/scaffold self-modification, arbitrary tool invention,
 or agent-authored scenario changes.
 
 Safety: LLM actors propose structured actions only. The environment validates actions and restricts attacker actions to the local Badlands enclave. No arbitrary shell execution or external targeting is permitted.
+
+## DS-29 Agents SDK campaign command
+
+DS-29 direct live validation uses the same tunnels and endpoints, but routes
+role decisions through the OpenAI Agents SDK with one `SQLiteSession` per role.
+Green uses the specialized cfd0 Qwen endpoint when reachable; if it is
+unavailable, classify that precisely rather than silently substituting shared
+Nano evidence for approval.
+
+```bash
+BADLANDS_LLM_TIMEOUT_SECONDS=240 \
+BADLANDS_ATTACKER_LLM_BASE_URL=http://127.0.0.1:18000/v1 \
+BADLANDS_ATTACKER_LLM_API_KEY=EMPTY \
+BADLANDS_ATTACKER_LLM_MODEL=NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 \
+BADLANDS_DEFENDER_LLM_BASE_URL=http://127.0.0.1:18001/v1 \
+BADLANDS_DEFENDER_LLM_API_KEY=EMPTY \
+BADLANDS_DEFENDER_LLM_MODEL=badlands-defender-nemotron-nano \
+BADLANDS_GREEN_LLM_BASE_URL=http://127.0.0.1:18002/v1 \
+BADLANDS_GREEN_LLM_API_KEY=EMPTY \
+BADLANDS_GREEN_LLM_MODEL=badlands-green-qwen35-2b \
+uv run badlands-agents-sdk-campaign \
+  --sdk-mode direct \
+  --seed 7 \
+  --steps 2 \
+  --until 40 \
+  --out runs/ds29-live-campaign
+
+uv run badlands-replay runs/ds29-live-campaign/step-2.jsonl
+```
+
+The report path is `runs/ds29-live-campaign/campaign-report.json`. The SDK
+session database path is `runs/ds29-live-campaign/agents-sdk-sessions.sqlite`.
+The report records preflight, role session ids, step traces, replay result,
+step-2 memory effects, qualitative samples, telemetry, and canonicality.

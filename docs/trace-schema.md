@@ -65,3 +65,12 @@ only after the configured visibility and alert delay, and they cite source
 telemetry ids. Benign-noise provenance is recorded as `state_transition`
 metadata and overlapping telemetry/alert artifacts, not as actor-visible
 benign/malicious labels.
+
+DS-29 campaign continuity uses ordinary `state_transition` records rather than
+new trace event types. `kind=campaign_step_started` records campaign id, step,
+memory mode, SDK mode, and per-role SDK session ids. Before a role receives
+step-2 memory, the harness emits `kind=campaign_memory_visible` with the
+current role, current campaign step, a memory summary, a current-trace event id,
+and upstream source trace/event ids. Actors cite the current-trace memory event
+id; reviewers can follow that event back to the prior step trace. Replay does
+not read SDK sessions or campaign reports.

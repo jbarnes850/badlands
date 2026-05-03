@@ -64,6 +64,9 @@
   from trace-visible LLM decision events: repeated actions, evidence-id
   grounding, unsupported evidence ids, suspected hidden-state claims, defender
   blast-radius/overreaction cues, and green SOC-like behavior.
+- DS-29 adds a two-step Agents SDK campaign harness with one role-isolated
+  SDK session per actor, trace-visible campaign-memory visibility events,
+  hidden/cross-role memory rejection tests, and JSONL-only replay.
 
 ## Intentionally incomplete
 
@@ -81,3 +84,6 @@
 - DS-22 attacker objective prerequisites and artifacts are ATT&CK-shaped but
   not yet statistically calibrated to Mordor/OpTC/CALDERA traces. Next step:
   DS-25/DS-26 provenance and calibration.
+- DS-29 is a smoke campaign harness, not representative long-horizon evidence.
+  The current 32768-token served context remains liveness context unless a
+  larger stable context is measured and recorded by role.
