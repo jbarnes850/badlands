@@ -5,7 +5,7 @@ Derived from the virtualisation/modelling-gap taxonomy in arXiv:2604.08805v1 and
 ## Virtualisation gap
 
 - [ ] Network and host roles are tied to a named mission workflow, not arbitrary nodes.
-- [ ] Host/service behavior includes operational characteristics: availability, latency/failure, user ownership, criticality, and dependencies.
+- [x] Host/service behavior includes operational characteristics: availability, degraded/unavailable failure states, user ownership, criticality, and dependencies.
 - [ ] Green users generate normal work, auth, files, email/tickets, and benign noise.
 - [ ] Green disruption changes mission score.
 - [ ] Red behavior is calibrated against adversary emulation or ATT&CK-mapped traces.
@@ -33,7 +33,7 @@ Derived from the virtualisation/modelling-gap taxonomy in arXiv:2604.08805v1 and
 
 - [ ] Every action maps to a real defender/attacker capability.
 - [ ] Each action specifies prerequisites, duration, success/failure modes, side effects, and observable artifacts.
-- [ ] Defensive containment has blast radius and rollback mechanics.
+- [x] Defensive containment has blast radius and rollback mechanics.
 - [ ] Actions can fail or be partially effective.
 
 ## Modelling gap: reward/scoring
@@ -41,7 +41,7 @@ Derived from the virtualisation/modelling-gap taxonomy in arXiv:2604.08805v1 and
 - [ ] Scoring is separate from agent observations.
 - [ ] Scoring is auditable from the trace.
 - [ ] Security score penalizes dwell, persistence, credential spread, lateral reach, objective completion, and exfiltration/disruption.
-- [ ] Mission score penalizes downtime, user lockouts, missed tasks, ticket backlog, and blocked dependencies.
+- [x] Mission score penalizes downtime, user lockouts, missed tasks, ticket backlog, and blocked dependencies.
 - [ ] Defensive quality score rewards timely, evidence-based, least-disruptive containment.
 - [ ] Security-only shutdown policies fail.
 

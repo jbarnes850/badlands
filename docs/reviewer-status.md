@@ -36,6 +36,9 @@
 - Green `use_mission_app`, `read_write_file`, and `create_ticket` outcomes route through active service endpoints. Mission task trace events cite service/auth/ticket evidence in `source_event_ids`.
 - File access requires IdP session validation and emits both auth validation telemetry and service `file_read` telemetry.
 - Defender ticket visibility is role-valid: tickets appear through service telemetry and mission/ticket trace artifacts, not hidden service state.
+- Dependency graph is now first-class for hosts, services, users, telemetry, and mission tasks. Propagated `available`/`degraded`/`unavailable` state changes emit `dependency_state_changed` trace events and are pushed into active service endpoints.
+- Defender host isolation and rollback now propagate through service dependencies. Attacker collection from the file-share tier can degrade the file-share dependency and produce mission/security score impact through trace evidence.
+- Replay evidence for service downtime includes dependency-state source events, so blocked dependencies remain auditable from the JSONL trace.
 
 ## Intentionally incomplete
 
@@ -43,5 +46,5 @@
 - IdP and mission app currently share one local Python HTTP process. Risk: fewer deployment and network-boundary side effects than a separately deployed IdP container. Next step: split the IdP into its own compose service once this identity-state contract is stable.
 - Email is represented through ticket-like artifacts, not SMTP/IMAP. Risk: less realistic phishing/report workflow. Next step: add local MailHog-style service or stdlib mailbox endpoint.
 - Durations/rates are contract-informed constants, not yet calibrated from OpTC/LANL/CALDERA. Next step: add calibration fixtures and cite per-action sources.
-- Scenario dependencies are represented in the fixture but not fully propagated through active service health. Risk: dependency graphs are inspectable before they are operationally authoritative. Next step: DS-18.
+- Dependency propagation is causal for the compact Mission Desk workflow, but degraded-mode semantics are still coarse: degraded currently blocks current mission work rather than modelling latency, retry, or partial success. Next step: DS-28 for richer workflows and DS-20 for calibrated noise/sensor limits.
 - Mission task templates are scenario fields, and the active service now owns the compact file/ticket workflow. Risk: workflow richness remains limited. Next step: DS-28.

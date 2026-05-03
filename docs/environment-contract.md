@@ -43,6 +43,13 @@ state transitions with trace-ingested service telemetry; Python may schedule
 work and mirror observed service outcomes but must not silently replace service
 truth.
 
+The first dependency-propagation slice is specified in
+[`docs/dependency-graph-contract.md`](dependency-graph-contract.md). Host,
+service, user, telemetry, and mission-task dependencies are first-class graph
+nodes with propagated `available`, `degraded`, and `unavailable` states.
+Dependency changes affect active service endpoints and must be reconstructable
+from trace evidence.
+
 ### Attacker state
 
 - Footholds, privileges, known credentials, discovered topology, persistence, in-flight actions.
@@ -156,6 +163,7 @@ Every run writes an append-only trace. Required event classes:
 - `action_started`: accepted action, precondition result, start time, planned duration.
 - `action_completed`: success/failure/partial, completion time, side effects, generated artifact ids.
 - `state_transition`: hidden state change reference; not agent-visible but trace-visible for audit.
+- `dependency_state_changed`: dependency graph node status changed, including propagated effects and source evidence.
 - `telemetry_emitted`: raw event id, source, normalized fields, visibility delay.
 - `alert_emitted`: rule id, source event ids, severity, confidence, delay, false-positive metadata if known to scorer.
 - `observation_delivered`: agent, observation ids, delivery time.

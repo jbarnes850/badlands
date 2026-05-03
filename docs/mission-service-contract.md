@@ -12,6 +12,12 @@ DS-17 makes current mission app, file share, and ticket outcomes authoritative i
 
 The service remains local and contained with the existing Mission Desk service process. IdP session validation is still owned by the identity service contract; file and mission endpoints call that IdP state rather than trusting Python mirrors.
 
+DS-18 adds dependency-state enforcement to these endpoints. The dependency
+graph controller pushes `available`, `degraded`, or `unavailable` state into
+the service via `/admin/service_state`; mission, file, identity, and ticket
+endpoints fail with dependency reasons when their service state cannot support
+work.
+
 ## Telemetry
 
 Mission service events use ECS-like fields where practical:
