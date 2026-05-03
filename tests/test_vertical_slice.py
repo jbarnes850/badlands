@@ -72,6 +72,15 @@ def test_magic_observation_ablation_changes_outcome(tmp_path: Path):
     assert magic["true_positive_actions"] > normal["true_positive_actions"]
 
 
+def test_magic_observation_ablation_does_not_mutate_defender_view(tmp_path: Path):
+    env = MissionDeskEnv(tmp_path / "magic-view.jsonl", seed=7, magic_observations=True)
+    env.run(20)
+    obs = env.defender_observation()
+    assert "magic" not in obs
+    assert "suspect_host" not in str(obs)
+    assert_no_forbidden(obs)
+
+
 def test_benign_noise_emits_trace_backed_ambiguous_alerts(tmp_path: Path):
     run_episode(args(tmp_path, trace=tmp_path / "noise.jsonl"))
     events = load_trace(tmp_path / "noise.jsonl")

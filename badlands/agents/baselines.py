@@ -16,8 +16,6 @@ def isolate_everything_defender(observation: dict[str, Any], *, seed: int = 1, m
 
 
 def alert_label_defender(observation: dict[str, Any], *, seed: int = 1, magic: bool = False) -> list[Action]:
-    if magic and observation.get("magic", {}).get("suspect_host"):
-        return [("isolate_host", {"host_id": observation["magic"]["suspect_host"]})]
     if observation.get("alerts"):
         return [("query_endpoint", {"host_id": "ws-alice"})]
     return []

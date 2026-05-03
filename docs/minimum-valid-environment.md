@@ -84,7 +84,9 @@ Scoring is computed from the trace, not privileged labels exposed to agents.
 ## 9. Ablations that prove realism dimensions matter
 
 1. Remove persistence: attacker footholds disappear between steps. A valid defender policy should become artificially easier; if scores do not change, persistence is not represented.
-2. Give magic observations: defender sees compromise truth. Scores should inflate; if not, observation uncertainty is ineffective.
+2. Give an experiment-only oracle baseline compromise truth outside the
+   production defender observation path. Scores should inflate; if not,
+   observation uncertainty is ineffective.
 3. Remove green activity: host isolation has no cost. Aggressive containment should become over-rewarded; the full environment must penalize it.
 4. Make time turn-based/instant: no overlap or delayed effects. Race conditions and preemption should disappear.
 5. Remove false positives/noisy benign alerts: triage becomes a label-reading task.

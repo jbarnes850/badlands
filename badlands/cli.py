@@ -137,7 +137,13 @@ def run_episode(args: argparse.Namespace) -> dict:
         schedule_llm_defender(env, DefenderLLM(cache_dir=args.llm_cache, seed=args.seed))
     else:
         def apply_policy() -> None:
-            for idx, (action, params) in enumerate(POLICIES[args.defender](env.defender_observation(), seed=args.seed, magic=args.magic_observations)):
+            observation = env.defender_observation()
+            actions = (
+                [("isolate_host", {"host_id": env.state.attacker_host})]
+                if args.magic_observations
+                else POLICIES[args.defender](observation, seed=args.seed, magic=False)
+            )
+            for idx, (action, params) in enumerate(actions):
                 env.schedule(idx * 4, lambda action=action, params=params: env.defender(action, params))
         env.schedule(12, apply_policy)
         env.schedule(20, apply_policy)

@@ -274,8 +274,6 @@ class MissionDeskEnv:
         ]
         obs["service_inventory"] = public_dependency_inventory(self.dependency_graph)
         obs["sensor_status"] = self._public_sensor_status()
-        if self.magic_observations:
-            obs["magic"] = {"suspect_host": self.state.attacker_host}
         return obs
 
     def _sensor_decision(self, category: str) -> SensorDecision:
