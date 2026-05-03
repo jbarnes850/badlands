@@ -244,16 +244,27 @@ Open:
 http://127.0.0.1:8765/operator-ui/?state=/runs/<campaign-id>/operator-live-state.json
 ```
 
-The first screen is the live three-agent interaction:
+The first screen is the live self-play loop. Four cards read left to right
+inside Mission Desk: Green/User, Environment, Attacker, Defender. Each card
+shows the last completed turn for that role, refreshed every second from the
+canonical JSONL trace. The card is not a live token stream; it is the most
+recent JSONL `llm_decision` event with the role's chosen action, the model's
+own rationale, prompt and completion tokens, and wall latency. While a role is
+mid-turn the card stays on the previous decision and the activity badge shows
+"thinking Ns · last evt_xxxxxx" against typical p95 latency for that role.
 
-- Green/User: the mission task and user-visible state.
-- Attacker: the current target and intrusion action.
-- Defender: protected assets, alerts, and response action.
-- Interaction log: canonical trace events, newest first, with event IDs.
+Below the loop, a per-episode capability curve panel plots risk, cumulative
+token spend, and attacker progress against defender quality so the trend
+across episodes is readable at a glance. Three role pressure cards expose
+context pressure against the served 262,144 budget, SDK session item count,
+invalid decisions, repair pressure, model id, and endpoint. The mission
+effects strip carries the eight scored outcomes for the current episode with
+hover and keyboard tooltips that name the metric and its scoring direction.
 
-Metrics follow the interaction surface: elapsed time, tokens, replay status,
-endpoint health, mission score, security score, service downtime, compromised
-credentials, lateral movement, false positives, repairs, and evidence IDs.
+Replay status, evidence event IDs, role isolation gates, artifact paths, and
+the operator-events log live behind a single evidence drawer. They are
+secondary by design: the evidence contract is auditable at any time, but the
+loop is what the viewer should see first.
 
 ## Where Things Live
 
