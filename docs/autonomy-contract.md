@@ -65,9 +65,10 @@ Do not invert this order without a decision-log entry and Linear comment.
 
 For each issue, the night-shift Codex should:
 
-1. Read this contract, `docs/execution-roadmap.md`,
-   `docs/validation-matrix.md`, `docs/capability-curve-contract.md`, the
-   Linear issue, and the issue's required source pack.
+1. Read this contract, `docs/overnight-runbook.md`,
+   `docs/execution-roadmap.md`, `docs/validation-matrix.md`,
+   `docs/capability-curve-contract.md`, the Linear issue, and the issue's
+   required source pack.
 2. Inspect relevant current code and docs before editing.
 3. Execute the issue exactly within scope.
 4. Add or update tests and docs in the same slice.

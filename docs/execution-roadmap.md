@@ -3,6 +3,8 @@
 This is the current autonomous execution lane for the Badlands environment
 validity project. Linear is authoritative for issue status; this file is the
 canonical local context for ordering, dependencies, and drift control.
+Use `docs/overnight-runbook.md` as the executable workflow for autonomous
+planner/executor/reviewer runs.
 
 Current lane:
 

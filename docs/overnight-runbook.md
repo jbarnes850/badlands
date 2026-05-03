@@ -1,298 +1,192 @@
 # Overnight Runbook
 
-This runbook is for autonomous Codex execution across the Badlands environment
-roadmap. It converts the autonomy contract into an executable loop.
+This runbook defines the autonomous overnight workflow for Badlands issue
+execution. It is intentionally strict: do not bend or lower the quality bar to
+keep moving.
 
-Do not use this to batch changes. Execute one Linear issue at a time, in
-roadmap order, with independent review before continuing.
+## Macro goal
 
-## Mission
+Mission owners need continuous, affordable, mission-realistic cyber self-play
+measurement: always-on environments where co-evolving attacker and defender
+agents stress-test mission systems under realistic operational constraints, so
+leaders can see how cyber risk changes as model capability, test-time compute,
+cost, and system state evolve.
 
-Badlands exists to measure always-on, mission-realistic cyber self-play:
-co-evolving attacker and defender agents stress-test mission systems under
-operational constraints so leaders can see how cyber risk changes as model
-capability, test-time compute, cost, and system state evolve.
+Every overnight execution should serve this goal. If a change makes Badlands a
+cleaner toy benchmark but not a better mission-realistic measurement substrate,
+stop and reconsider.
 
-The current lane is still environment validity. The night shift should optimize
-for construct-valid measurement, not impressive agent behavior.
+## Operating loop
 
-## Starting conditions
+For each issue, execute this loop:
 
-Before executing DS-20 or any later issue:
+1. Read the Linear issue in full.
+2. Read canonical repo context:
+   - `README.md`
+   - `docs/autonomy-contract.md`
+   - `docs/execution-roadmap.md`
+   - `docs/validation-matrix.md`
+   - `docs/capability-curve-contract.md`
+   - issue-specific docs named by Linear.
+3. Search historical Codex session logs for relevant prior context before
+   repeating architecture work.
+4. Produce a scoped plan:
+   - issue id and goal;
+   - likely files touched;
+   - implementation boundaries;
+   - explicit out-of-scope items;
+   - test plan;
+   - live validation plan;
+   - expected trace/report/ledger artifacts;
+   - stop conditions.
+5. Execute the scoped plan.
+6. Run full verification:
+   - targeted tests;
+   - baseline lint and pytest;
+   - seeded trace and replay when runtime behavior changes;
+   - DS-24 live inference validation for environment, observation, prompt,
+     action, scoring, campaign, or qualitative-behavior changes.
+7. Inspect live outputs qualitatively:
+   - attacker objective progression and evidence use;
+   - defender uncertainty handling, evidence gathering, and blast-radius
+     reasoning;
+   - green/user mission realism;
+   - invalid, brittle, repeated, or hidden-state behavior.
+8. Run a subagent-driven review pass to reduce executor bias.
+9. Fix blocking findings and repeat verification.
+10. Append meaningful acceptance, live, campaign, ablation, or blocker runs to
+    `runs/run-ledger.jsonl` using `docs/run-ledger.schema.json`.
+11. Commit in logical chunks.
+12. Update Linear with:
+    - commits;
+    - validation commands and results;
+    - live command and result;
+    - trace/report/cache paths;
+    - qualitative output summary;
+    - residual risks;
+    - reviewer status.
+13. Move to the next issue only if the current issue reaches the quality bar and
+    no stop condition fired.
 
-- worktree is clean or only contains the current issue's intended changes;
-- autonomy docs are committed;
-- Linear is reachable;
-- current issue status and acceptance criteria are read from Linear;
-- required source pack on the issue is read;
-- relevant repo docs are read:
-  - `docs/autonomy-contract.md`
-  - `docs/execution-roadmap.md`
-  - `docs/validation-matrix.md`
-  - `docs/capability-curve-contract.md`
-  - `docs/dgx-spark-live-inference.md`
-  - `docs/run-ledger.md`
-  - `docs/decisions.md`
-- historical session logs are queried for the issue id, predecessor issues,
-  and macro terms before implementation.
+## Historical session context
 
-Preferred session-history query pattern:
+Before implementation, search repo-local history if available. Otherwise search
+the global Codex history store:
 
 ```bash
 sqlite3 /Users/jarrodbarnes/.codex/session-history/codex_sessions.sqlite \
-  "SELECT m.timestamp, m.session_id, m.role, snippet(messages_fts, 0, '[', ']', '...', 12), m.source_path, m.line_no
+  "SELECT m.timestamp, m.session_id, m.role, snippet(messages_fts, 0, '[', ']', '...', 16), m.source_path, m.line_no
    FROM messages_fts
    JOIN messages m ON m.id = messages_fts.rowid
-   WHERE messages_fts MATCH 'DS-20 OR \"benign noise\" OR \"sensor limits\" OR Badlands'
+   WHERE messages_fts MATCH '<issue id or concept>'
    ORDER BY bm25(messages_fts)
    LIMIT 20;"
 ```
 
-Adjust the query terms for the active issue. Treat session history as context,
-not truth; verify against Linear, source docs, code, traces, and tests.
+Use history as context, not truth. Validate implementation claims against
+Linear, repo docs, tests, traces, reports, and primary sources.
 
-## Execution lane
+## Subagent protocol
 
-Canonical order:
+Use subagents only where they materially reduce bias or run work in parallel.
+Do not delegate the immediate blocking task.
+
+Minimum useful subagent roles:
+
+- Planner: validates scope, likely files, risk areas, tests, and live validation
+  before implementation.
+- Reviewer: findings-first review after implementation, with P1/P2/P3 issues,
+  file/line references, validation review, and acceptance status.
+- Explorer: answers narrow codebase questions when the executor needs context
+  without broad speculation.
+
+The executor remains responsible for integration, validation, final artifacts,
+and not accepting weak review.
+
+## Live verification requirement
+
+For this lane, live inference is not decorative. It is part of the measurement
+loop.
+
+Any issue that changes environment behavior, observations, prompts, action
+surfaces, scoring, mission workflows, campaign state, memory, or qualitative
+review must end with:
+
+- DS-24 `badlands-live-validate` or successor live command;
+- endpoint preflight;
+- completed trace with `score_snapshot`;
+- replay success;
+- compact report;
+- cache path;
+- per-role token/latency/attempt/repair/invalid telemetry;
+- serving/backpressure evidence or explicit unavailable marker;
+- qualitative attacker/defender/green output inspection;
+- run-ledger entry.
+
+Endpoint saturation is an infrastructure blocker, not an environment failure,
+but it must be recorded with the exact endpoint, command, and follow-up command.
+
+## Quality bar
+
+Do not lower the bar to make progress.
+
+An issue is not complete unless:
+
+- acceptance criteria pass;
+- lint and tests pass;
+- replay is deterministic;
+- score fields cite trace evidence;
+- observations remain role-valid;
+- hidden state is absent from role observations and memory;
+- live model behavior is inspected qualitatively where applicable;
+- invalid/brittle behavior is preserved as measurement signal;
+- reviewer blocking findings are resolved;
+- run artifacts are named and ledgered;
+- Linear is updated with enough evidence for a human to audit later.
+
+## Stop conditions
+
+Stop instead of improvising when:
+
+- a score cannot be recomputed from trace evidence;
+- a live run cannot produce `score_snapshot` and replay;
+- hidden/scorer/future state is needed for a role to succeed;
+- implementation would pull DS-29 memory/session scope into earlier issues;
+- arbitrary host tools or unsafe offensive capability would be required;
+- the same fix fails twice;
+- an advertised ablation is unimplemented;
+- live output inspection shows the environment is being solved by a toy cue;
+- capability-curve metadata is missing for a claimed comparison;
+- the executor cannot produce a reviewer-ready artifact trail.
+
+## Overnight approval authority
+
+Jarrod is expected to be offline during an overnight run. The independent
+reviewer/subagent is the approval authority for normal issue-by-issue
+progression.
+
+Allowed outcomes:
+
+- `APPROVED`: executor may commit, update Linear, close/mark done, and continue
+  to the next roadmap issue if all other gates are clean.
+- `NOT APPROVED`: executor must fix within the current issue scope, rerun the
+  relevant validation, and request another reviewer pass.
+- `BLOCKED`: executor must stop, preserve artifacts, update Linear with blocker
+  evidence, and wait for Jarrod.
+
+The reviewer cannot waive live validation, approve scope expansion, weaken
+trace/replay canonicality, allow hidden-state leakage, or pull DS-29 memory and
+campaign work into earlier issues. Those require Jarrod, so the correct
+overnight action is to stop.
+
+## Current autonomous lane
+
+Follow the lane in `docs/execution-roadmap.md`:
 
 ```text
 DS-20 -> DS-21 -> DS-22 -> DS-28 -> DS-27 -> DS-23 -> DS-29 -> DS-25/DS-26
 ```
 
-Do not skip ahead. Do not merge adjacent issues. Do not close an issue unless
-the independent reviewer/subagent pass is approved.
-
-## Per-issue loop
-
-### 1. Intake
-
-Read:
-
-- the Linear issue body, comments, labels, status, and dependencies;
-- issue-specific contract in `docs/execution-roadmap.md`;
-- required source pack on the issue;
-- prior issue completion comments that this issue depends on;
-- relevant session-history excerpts.
-
-Produce a short intake note for yourself:
-
-- what this issue must prove;
-- what it must not pull forward;
-- likely files touched;
-- tests and live validation expected;
-- stop conditions.
-
-### 2. Scope plan
-
-Create a compact implementation plan. It should include:
-
-- files likely touched;
-- risk areas;
-- trace/scoring/observation invariants at risk;
-- offline tests;
-- seeded trace/replay plan;
-- DS-24 live validation plan;
-- qualitative model-output inspection targets;
-- run-ledger fields expected;
-- downstream issue boundaries.
-
-Do not expand scope to make the implementation more elegant.
-
-### 3. Execute
-
-Implement the issue with small, reviewable diffs. Preserve these invariants:
-
-- Badlands JSONL trace is canonical.
-- Scores cite trace evidence.
-- Role observations expose only role-valid artifacts.
-- Invalid or brittle LLM behavior is preserved as measurement signal.
-- The active network/services should be authoritative where the issue touches
-  service behavior.
-- No custom durable memory or campaign state before DS-29.
-- No unsafe actor tooling or arbitrary shell access.
-
-### 4. Verify
-
-Every remaining environment issue must run the full verification class unless
-blocked by infrastructure:
-
-```bash
-uv run --extra dev ruff check badlands tests
-uv run --extra dev python -m pytest -q
-uv run badlands-episode --seed 7 --trace runs/<issue>-smoke.jsonl
-uv run badlands-replay runs/<issue>-smoke.jsonl
-```
-
-Then run DS-24 live validation:
-
-```bash
-BADLANDS_LIVE_LLM=1 \
-BADLANDS_LLM_TIMEOUT_SECONDS=240 \
-uv run badlands-live-validate \
-  --seed 7 \
-  --until 40 \
-  --trace runs/<issue>-live.jsonl \
-  --cache /tmp/badlands-<issue>-live-cache \
-  --report runs/<issue>-live-report.json
-```
-
-Use the current endpoint environment from `docs/dgx-spark-live-inference.md`.
-If the Super attacker endpoint is saturated, Nano may be used only for
-liveness validation and must be labeled as such in the report and Linear
-comment.
-
-If live validation is blocked by endpoint availability, do not silently pass.
-Classify the blocker precisely and stop. During overnight execution, do not
-invent a human-approved offline-only deferral.
-
-### 5. Inspect model outputs
-
-Until DS-27 formalizes the rubric, manually inspect DS-24 report/cache/trace
-outputs and write a qualitative summary:
-
-- attacker: plausible progression, objective pursuit, evidence grounding,
-  repetition or degeneracy;
-- defender: evidence gathering, false-positive handling, blast-radius reasoning,
-  harmful automation avoidance;
-- green: mission-user realism, user-experienced state, ticket/task behavior,
-  hidden-truth leakage;
-- all roles: invalid decision classes, repair pressure, invented evidence ids,
-  schema brittleness, latency/token cost.
-
-Valid JSON is not sufficient. The model behavior must make sense for the
-mission world.
-
-### 6. Append run ledger
-
-Append meaningful validation runs to `runs/run-ledger.jsonl` using
-`docs/run-ledger.schema.json`.
-
-For every live run, include:
-
-- issue id;
-- commit or `uncommitted`;
-- command;
-- seed;
-- trace/report/cache paths;
-- score summary;
-- model and endpoint by role;
-- harness/scaffold id;
-- scenario id/version and fixture hash where available;
-- memory mode;
-- tool surface;
-- token and wall-clock budget;
-- cost/power class;
-- run tier;
-- comparison axis and capability curve group id;
-- advertised and served context by role;
-- qualitative findings;
-- blocker/failure classification;
-- review status.
-
-### 7. Independent review
-
-Run a separate reviewer/subagent pass after implementation and before
-continuing. The reviewer is the overnight approval authority for normal
-issue closure.
-Reviewer output must follow `docs/autonomy-contract.md`:
-
-1. `APPROVED` or `NOT APPROVED`.
-2. P1/P2/P3 findings with file and line references.
-3. Validation commands run.
-4. Trace/report evidence reviewed.
-5. Live model-output review.
-6. Acceptance criteria check.
-7. Downstream readiness.
-8. Residual risks.
-
-The executor may not self-certify an issue. If no separate reviewer/subagent is
-available, stop after producing the reviewer-ready package.
-
-### 8. Fix or stop
-
-If reviewer finds P1 or acceptance-blocking P2 issues:
-
-- fix within the same issue scope;
-- rerun affected tests and live validation when behavior changed;
-- request another reviewer pass.
-
-If the same failure recurs twice, stop and re-diagnose from first principles.
-
-### 9. Commit and Linear update
-
-After reviewer approval:
-
-- commit the issue with a concise issue-prefixed message;
-- add a Linear completion comment with:
-  - implementation summary;
-  - commit hash;
-  - validation commands/results;
-  - trace/report/cache paths;
-  - run-ledger entry path;
-  - live qualitative summary;
-  - reviewer approval summary;
-  - residual risks and downstream mapping;
-- close/mark done only if the reviewer approved and acceptance criteria are met.
-
-### 10. Continue or halt
-
-Proceed to the next roadmap issue only if:
-
-- current issue is approved;
-- tests pass;
-- replay passes;
-- live validation passes;
-- run ledger is updated;
-- Linear is updated;
-- no stop condition is open;
-- worktree is clean.
-
-Otherwise stop.
-
-## Full-roadmap guardrails
-
-The full roadmap can run autonomously only as a chain of approved single-issue
-loops. It is not approved as one giant unattended implementation batch.
-
-Hard stop if:
-
-- hidden state reaches any actor observation or memory;
-- score evidence cannot be replayed from JSONL;
-- DS-24 live validation cannot complete;
-- qualitative outputs show the agent is succeeding through prompt/interface
-  artifacts rather than environment reasoning;
-- a change pulls DS-29 memory/campaign work before DS-29;
-- context/serving changes affect capability claims but are not recorded;
-- the executor would need to invent scope not present in Linear.
-
-## First issue
-
-Start with DS-20 only:
-
-```text
-DS-20: Add calibrated benign noise, false positives, and sensor limits.
-```
-
-DS-20 is the first test of the autonomy loop. If it cannot pass with live
-validation, qualitative review, ledger evidence, independent review, and a clean
-  commit, do not proceed to DS-21.
-
-## Overnight approval authority
-
-Jarrod is not expected to approve intermediate gates during the overnight run.
-The independent reviewer/subagent is the approval authority for normal
-issue-by-issue progression.
-
-Allowed reviewer outcomes:
-
-- `APPROVED`: executor may commit, update Linear, close/mark done, and move to
-  the next roadmap issue if all other gates are clean.
-- `NOT APPROVED`: executor must fix within issue scope and request another
-  reviewer pass.
-- `BLOCKED`: executor must stop, leave artifacts, update Linear with blocker
-  evidence, and wait for Jarrod.
-
-The reviewer cannot approve scope expansion, live-validation deferral,
-weakening trace/replay canonicality, or pulling DS-29 memory/campaign work into
-earlier issues. Those require Jarrod after the overnight run, so the correct
-action is to stop.
+Execute one issue at a time. The first overnight run should prefer `DS-20`
+only, or at most continue to `DS-21` if `DS-20` is fully verified and approved
+by the reviewer protocol.
