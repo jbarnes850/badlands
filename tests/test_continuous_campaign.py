@@ -61,6 +61,24 @@ def test_adapter_continuous_campaign_writes_operator_artifacts(tmp_path: Path, m
     assert (tmp_path / "runs" / "run-ledger.jsonl").read_text()
 
 
+def test_raw_trajectory_mode_records_sdk_session_strategy(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    args = _args(tmp_path / "raw-run")
+    args.memory_mode = "sdk_raw_trajectory"
+    args.sdk_session_item_limit = None
+    args.sdk_session_compaction_keep_recent_items = 24
+
+    report = run_campaign(args)
+
+    assert report["memory_mode"] == "sdk_raw_trajectory"
+    assert report["sdk_session_strategy"]["mode"] == "openai_agents_sdk_session_raw_trajectory"
+    assert report["sdk_session_strategy"]["history_retrieval"] == "all_items"
+    assert report["role_isolation"]["separate_sdk_sessions"] is True
+    assert report["episode_reports"][0]["memory_mode"] == "sdk_raw_trajectory"
+    state = json.loads((tmp_path / "raw-run" / "operator-state.json").read_text())
+    assert state["role_isolation"]["sdk_raw_trajectory"] is True
+
+
 def test_context_target_blocker_reports_all_roles_below_target() -> None:
     results = [
         {"role": "green", "served_context_tokens": 32768},

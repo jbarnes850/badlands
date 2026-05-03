@@ -31,6 +31,10 @@ class AgentsSdkCompatClient:
         campaign_id: str,
         trace_id: str | None = None,
         session_item_limit: int | None = None,
+        session_context_limit_tokens: int | None = None,
+        session_compaction_ratio: float = 0.85,
+        session_hard_stop_ratio: float = 0.95,
+        session_compaction_keep_recent_items: int = 24,
     ):
         self.role = role
         self.base_url = base_url.rstrip("/")
@@ -41,6 +45,10 @@ class AgentsSdkCompatClient:
         self.campaign_id = campaign_id
         self.trace_id = trace_id
         self.session_item_limit = session_item_limit
+        self.session_context_limit_tokens = session_context_limit_tokens
+        self.session_compaction_ratio = session_compaction_ratio
+        self.session_hard_stop_ratio = session_hard_stop_ratio
+        self.session_compaction_keep_recent_items = max(2, session_compaction_keep_recent_items)
         self.last_completion_telemetry: dict[str, Any] = {}
         session_db_path.parent.mkdir(parents=True, exist_ok=True)
         self._openai = AsyncOpenAI(base_url=self.base_url, api_key=self.api_key)
@@ -78,6 +86,7 @@ class AgentsSdkCompatClient:
             "sdk_session_id": self.session_id,
             "sdk_session_db": str(self.session_db_path),
             "sdk_session_item_limit": self.session_item_limit,
+            "sdk_session_strategy": self.session_strategy(),
             "sdk_trace_group_id": self.campaign_id,
             "attempt_count": 0,
             "repair_count": 0,
@@ -92,6 +101,10 @@ class AgentsSdkCompatClient:
             "repair_invalid_count": 0,
             "final_invalid_count": 0,
             "parse_failures": 0,
+            "sdk_session_context_before": None,
+            "sdk_session_context_for_model": None,
+            "sdk_session_context_after": None,
+            "sdk_session_compaction": None,
         }
         started = time.perf_counter()
         repair_messages: list[dict[str, str]] | None = None
@@ -100,7 +113,15 @@ class AgentsSdkCompatClient:
             sdk_run_id = f"{self.campaign_id}-{self.role}-{uuid.uuid4().hex[:12]}"
             telemetry["sdk_run_id"] = sdk_run_id
             active_messages = repair_messages or messages
-            raw = await self._run_agent(active_messages, sdk_run_id=sdk_run_id)
+            raw, session_telemetry = await self._run_agent(active_messages, sdk_run_id=sdk_run_id)
+            telemetry["sdk_session_context_before"] = session_telemetry.get("before")
+            telemetry["sdk_session_context_after"] = session_telemetry.get("after")
+            telemetry["sdk_session_context_for_model"] = session_telemetry.get("for_model")
+            telemetry["sdk_session_compaction"] = session_telemetry.get("compaction")
+            context_for_model = session_telemetry.get("for_model") or {}
+            telemetry["prompt_token_estimate"] = int(context_for_model.get("token_estimate") or 0) + _estimate_tokens(
+                json.dumps(active_messages, sort_keys=True)
+            )
             telemetry["raw_outputs"].append({"attempt": attempt + 1, "content": raw})
             telemetry["completion_tokens"] += _estimate_tokens(raw)
             try:
@@ -160,9 +181,25 @@ class AgentsSdkCompatClient:
             telemetry,
         )
 
-    async def _run_agent(self, messages: list[dict[str, str]], *, sdk_run_id: str) -> str:
+    def session_strategy(self) -> dict[str, Any]:
+        return {
+            "mode": "openai_agents_sdk_sqlite_session",
+            "item_limit": self.session_item_limit,
+            "history_retrieval": "all_items" if self.session_item_limit is None else "latest_items",
+            "context_limit_tokens": self.session_context_limit_tokens,
+            "compaction_mode": "sdk_session_evidence_preserving_summary",
+            "compaction_ratio": self.session_compaction_ratio,
+            "hard_stop_ratio": self.session_hard_stop_ratio,
+            "compaction_keep_recent_items": self.session_compaction_keep_recent_items,
+            "session_primitives": ["SQLiteSession.get_items", "SQLiteSession.clear_session", "SQLiteSession.add_items"],
+            "long_term_memory_source": "role-isolated OpenAI Agents SDK SQLiteSession raw transcript",
+        }
+
+    async def _run_agent(self, messages: list[dict[str, str]], *, sdk_run_id: str) -> tuple[str, dict[str, Any]]:
         instructions = messages[0]["content"] if messages else "Return JSON only."
         user_input = messages[-1]["content"] if messages else "{}"
+        before, compaction = await self._compact_session_if_needed()
+        for_model = await self._session_pressure()
         agent = Agent(
             name=f"Badlands {self.role}",
             instructions=instructions,
@@ -185,4 +222,126 @@ class AgentsSdkCompatClient:
                 },
             ),
         )
-        return str(result.final_output)
+        after = await self._session_pressure()
+        return str(result.final_output), {"before": before, "for_model": for_model, "after": after, "compaction": compaction}
+
+    async def _session_pressure(self) -> dict[str, Any]:
+        items = await self._session.get_items(limit=None)
+        token_estimate = _estimate_tokens(json.dumps(items, sort_keys=True))
+        context_limit = self.session_context_limit_tokens
+        pressure = round(token_estimate / context_limit, 6) if context_limit else None
+        return {
+            "item_count": len(items),
+            "token_estimate": token_estimate,
+            "context_limit_tokens": context_limit,
+            "pressure": pressure,
+        }
+
+    async def _compact_session_if_needed(self) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        before = await self._session_pressure()
+        context_limit = self.session_context_limit_tokens
+        pressure = before.get("pressure")
+        if context_limit is None or pressure is None or pressure < self.session_compaction_ratio:
+            return before, None
+        items = await self._session.get_items(limit=None)
+        head_count = min(1, len(items))
+        tail_count = min(self.session_compaction_keep_recent_items, max(0, len(items) - head_count))
+        tail_start = len(items) - tail_count
+        middle = items[head_count:tail_start]
+        if not middle:
+            if pressure >= self.session_hard_stop_ratio:
+                raise RuntimeError(
+                    f"{self.role} SDK session pressure {pressure:.3f} exceeds hard stop "
+                    "without compactable middle history"
+                )
+            return before, None
+
+        summary = self._summarize_session_items(middle)
+        compacted_items = (
+            items[:head_count]
+            + [
+                {
+                    "role": "user",
+                    "content": "Summarize the prior Badlands role-visible trajectory.",
+                },
+                {"role": "assistant", "content": summary},
+            ]
+            + items[tail_start:]
+        )
+        await self._session.clear_session()
+        await self._session.add_items(compacted_items)
+        after = await self._session_pressure()
+        after_pressure = after.get("pressure")
+        if after_pressure is not None and after_pressure >= self.session_hard_stop_ratio:
+            raise RuntimeError(
+                f"{self.role} SDK session remained above hard-stop pressure after compaction: "
+                f"{after_pressure:.3f}"
+            )
+        return before, {
+            "role": self.role,
+            "mode": "sdk_session_evidence_preserving_summary",
+            "token_before": before["token_estimate"],
+            "token_after": after["token_estimate"],
+            "pressure_before": before["pressure"],
+            "pressure_after": after["pressure"],
+            "item_count_before": before["item_count"],
+            "item_count_after": after["item_count"],
+            "compacted_item_count": len(middle),
+            "preserved_head_count": head_count,
+            "preserved_recent_count": tail_count,
+            "summary": summary,
+        }
+
+    def _summarize_session_items(self, items: list[dict[str, Any]]) -> str:
+        decisions: list[str] = []
+        observation_ids: set[str] = set()
+        decision_ids: set[str] = set()
+        for item in items:
+            content = _item_content_text(item)
+            parsed = _parse_json_maybe(content)
+            if isinstance(parsed, dict):
+                observation_ids.update(str(eid) for eid in parsed.get("observation_event_ids", []) if isinstance(eid, str))
+                evidence_ids = parsed.get("evidence_ids")
+                if isinstance(evidence_ids, list):
+                    decision_ids.update(str(eid) for eid in evidence_ids if isinstance(eid, str))
+                action = parsed.get("action")
+                if isinstance(action, str):
+                    intent = str(parsed.get("intent") or parsed.get("rationale") or "")[:180]
+                    decisions.append(f"{action}: {intent}".strip())
+        summary = {
+            "summary_type": "badlands_sdk_session_compaction",
+            "role": self.role,
+            "source": "role-visible SDK session transcript only",
+            "compacted_items": len(items),
+            "visible_observation_event_ids": sorted(observation_ids)[-80:],
+            "cited_decision_evidence_ids": sorted(decision_ids)[-80:],
+            "recent_decisions": decisions[-20:],
+            "constraints": [
+                "No hidden state, scorer truth, future schedule, or cross-role memory was used.",
+                "Continue from this summary plus the recent raw transcript tail.",
+                "Treat missing details as unknown rather than inventing evidence.",
+            ],
+        }
+        return json.dumps(summary, sort_keys=True)
+
+
+def _item_content_text(item: dict[str, Any]) -> str:
+    content = item.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, dict):
+                text = part.get("text") or part.get("content")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
+    return json.dumps(item, sort_keys=True)
+
+
+def _parse_json_maybe(text: str) -> Any:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None

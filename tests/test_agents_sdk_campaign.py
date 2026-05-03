@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from pathlib import Path
 
 import pytest
 
+from badlands.agents.agents_sdk import AgentsSdkCompatClient
 from badlands.agents.campaign_memory import CampaignMemoryStore, MemoryFact, assert_no_forbidden_memory, memory_fact_from_decision
 from badlands.agents.context_compaction import CompactionThresholds, compact_role_campaign_memory
 from badlands.campaigns.agents_sdk_smoke import _compact_if_needed, run_campaign
@@ -106,6 +108,64 @@ def test_campaign_memory_is_role_isolated() -> None:
     assert json.dumps(defender_memory) != json.dumps(attacker_memory)
     assert "Attacker" not in json.dumps(defender_memory)
     assert "Defender" not in json.dumps(attacker_memory)
+
+
+def test_agents_sdk_session_compaction_uses_sdk_session_primitives(tmp_path: Path) -> None:
+    client = AgentsSdkCompatClient(
+        role="attacker",
+        base_url="http://127.0.0.1:9/v1",
+        api_key="EMPTY",
+        model="test-model",
+        session_id="attacker-session",
+        session_db_path=tmp_path / "sessions.sqlite",
+        campaign_id="test-campaign",
+        session_item_limit=None,
+        session_context_limit_tokens=1000,
+        session_compaction_ratio=0.15,
+        session_hard_stop_ratio=0.95,
+        session_compaction_keep_recent_items=2,
+    )
+
+    async def seed_and_compact() -> tuple[dict, dict | None, list[dict]]:
+        for idx in range(8):
+            await client._session.add_items(
+                [
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "role": "attacker",
+                                "observation_event_ids": [f"evt_{idx:06d}"],
+                                "allowed_actions": ["scan_network"],
+                            },
+                            sort_keys=True,
+                        ),
+                    },
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(
+                            {
+                                "action": "scan_network",
+                                "intent": f"continue discovery step {idx}",
+                                "evidence_ids": [f"evt_{idx:06d}"],
+                            },
+                            sort_keys=True,
+                        ),
+                    },
+                ]
+            )
+        before, record = await client._compact_session_if_needed()
+        return before, record, await client._session.get_items(limit=None)
+
+    before, record, items = asyncio.run(seed_and_compact())
+
+    assert before["item_count"] == 16
+    assert record is not None
+    assert record["mode"] == "sdk_session_evidence_preserving_summary"
+    assert record["compacted_item_count"] > 0
+    assert len(items) < before["item_count"]
+    assert "badlands_sdk_session_compaction" in json.dumps(items)
+    assert "evt_000000" in record["summary"]
 
 
 def test_campaign_memory_compaction_preserves_sources_and_recent_facts() -> None:

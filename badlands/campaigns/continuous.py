@@ -40,6 +40,14 @@ DEFAULT_ENDPOINTS = {
     "defender": "http://127.0.0.1:18001/v1",
     "green": "http://127.0.0.1:18001/v1",
 }
+
+
+def _optional_session_limit(value: str) -> int | None:
+    normalized = value.strip().lower()
+    if normalized in {"none", "unbounded", "all"}:
+        return None
+    parsed = int(value)
+    return parsed if parsed > 0 else None
 CURVE_FIELDS = (
     "risk_vs_elapsed_wall_clock",
     "attacker_objective_progress_vs_token_spend",
@@ -87,14 +95,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--service-url")
     parser.add_argument("--chat-timeout", type=int, default=240)
     parser.add_argument("--sdk-mode", choices=("direct", "adapter"), default="direct")
-    parser.add_argument("--memory-mode", choices=("campaign",), default="campaign")
+    parser.add_argument("--memory-mode", choices=("campaign", "sdk_raw_trajectory"), default="sdk_raw_trajectory")
     parser.add_argument("--served-context-target", type=int, default=262144)
     parser.add_argument("--context-warning-ratio", type=float, default=0.70)
     parser.add_argument("--context-compaction-ratio", type=float, default=0.85)
     parser.add_argument("--context-hard-stop-ratio", type=float, default=0.95)
     parser.add_argument("--compaction-preserve-head", type=int, default=1)
     parser.add_argument("--compaction-preserve-recent", type=int, default=2)
-    parser.add_argument("--sdk-session-item-limit", type=int, default=12)
+    parser.add_argument("--sdk-session-item-limit", type=_optional_session_limit, default=None)
+    parser.add_argument("--sdk-session-compaction-keep-recent-items", type=int, default=24)
     parser.add_argument("--health-check-episodes", type=int, default=1)
     parser.add_argument("--min-episodes", type=int, default=1)
     parser.add_argument("--max-episodes", type=int, default=0)
@@ -274,6 +283,7 @@ def _run_episode(
         compactions=compactions,
         preserve_head=args.compaction_preserve_head,
         preserve_recent=args.compaction_preserve_recent,
+        memory_mode=args.memory_mode,
     )
     env.run(args.episode_until)
     events = load_trace(trace_path)
@@ -304,6 +314,7 @@ def _run_episode(
     report = {
         "campaign_id": accumulator.campaign_id,
         "episode": episode,
+        "memory_mode": args.memory_mode,
         "seed": seed,
         "trace_path": str(trace_path),
         "report_path": str(report_path),
@@ -423,11 +434,13 @@ def _build_report(
         "capability_group_id": args.capability_group_id,
         "run_tier": args.run_tier,
         "memory_mode": args.memory_mode,
+        "sdk_session_strategy": _sdk_session_strategy(args),
         "sdk_mode": "direct_sdk" if args.sdk_mode == "direct" else "adapter_fallback",
         "wall_clock_budget_seconds": acc.budget_seconds,
         "elapsed_seconds": round(elapsed, 6),
         "remaining_wall_clock_budget_seconds": max(0, round(acc.budget_seconds - elapsed, 6)),
         "episode_count": len(acc.episode_reports),
+        "episode_reports": acc.episode_reports,
         "preflight": preflight_results,
         "served_context_tokens_by_role": _context_by_role(
             preflight_results,
@@ -450,7 +463,7 @@ def _build_report(
         "curves": _curves(acc, memory),
         "qualitative_strategy_change_summary": _strategy_summary(acc),
         "compaction": {
-            "mode": "evidence-preserving-summary",
+            "mode": "sdk-session-evidence-preserving-summary" if args.memory_mode == "sdk_raw_trajectory" else "evidence-preserving-summary",
             "count": len(compactions),
             "events": [item.as_report() for item in compactions],
         },
@@ -512,6 +525,7 @@ def _operator_state(
             "shared_defender_green_endpoint": endpoints["defender"].base_url == endpoints["green"].base_url,
             "separate_sdk_sessions": len(set(sessions.values())) == len(ROLE_ORDER),
             "separate_campaign_memory": True,
+            "sdk_raw_trajectory": report.get("memory_mode") == "sdk_raw_trajectory",
             "separate_cache_keys": True,
             "separate_trace_roles": True,
             "separate_telemetry_buckets": True,
@@ -554,6 +568,7 @@ def _role_isolation(
         "same_endpoint_allowed": "only with role-isolated prompts, sessions, memory, actors, observations, cache keys, trace roles, telemetry, and token buckets",
         "separate_sdk_sessions": len(set(sessions.values())) == len(ROLE_ORDER),
         "sdk_session_ids": sessions,
+        "sdk_raw_trajectory": acc.episode_reports[0].get("memory_mode") == "sdk_raw_trajectory" if acc.episode_reports else False,
         "separate_campaign_memory": set(memory_roles) == set(ROLE_ORDER),
         "campaign_memory_fact_counts": memory_roles,
         "separate_cache_keys": True,
@@ -782,6 +797,27 @@ def _fixed_variables(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _sdk_session_strategy(args: argparse.Namespace) -> dict[str, Any]:
+    if args.memory_mode == "sdk_raw_trajectory":
+        return {
+            "mode": "openai_agents_sdk_session_raw_trajectory",
+            "item_limit": args.sdk_session_item_limit,
+            "history_retrieval": "all_items" if args.sdk_session_item_limit is None else "latest_items",
+            "context_limit_tokens": args.served_context_target,
+            "compaction_mode": "sdk_session_evidence_preserving_summary",
+            "compaction_ratio": args.context_compaction_ratio,
+            "hard_stop_ratio": args.context_hard_stop_ratio,
+            "compaction_keep_recent_items": args.sdk_session_compaction_keep_recent_items,
+            "long_term_memory_source": "role-isolated OpenAI Agents SDK SQLiteSession raw transcript",
+            "session_primitives": ["SQLiteSession.get_items", "SQLiteSession.clear_session", "SQLiteSession.add_items"],
+        }
+    return {
+        "mode": "bounded_tail_plus_campaign_memory_compaction",
+        "item_limit": args.sdk_session_item_limit,
+        "long_term_memory_source": "Badlands JSONL campaign memory",
+    }
+
+
 def _should_continue(args: argparse.Namespace, acc: CampaignAccumulator, episode_count: int) -> bool:
     if args.max_episodes and episode_count >= args.max_episodes:
         return False
@@ -913,6 +949,7 @@ def _command_args(args: argparse.Namespace) -> list[str]:
         ("--sdk-mode", args.sdk_mode),
         ("--memory-mode", args.memory_mode),
         ("--served-context-target", args.served_context_target),
+        ("--sdk-session-item-limit", args.sdk_session_item_limit if args.sdk_session_item_limit is not None else "none"),
     ]
     return [part for key, value in keep for part in (key, str(value))]
 

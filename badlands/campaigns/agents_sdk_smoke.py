@@ -326,6 +326,11 @@ def _actors(
                 campaign_id=campaign_id,
                 trace_id=f"trace-{campaign_id}-{role}",
                 session_item_limit=getattr(args, "sdk_session_item_limit", 12),
+                session_context_limit_tokens=getattr(args, "sdk_session_context_limit_tokens", None)
+                or getattr(args, "served_context_target", None),
+                session_compaction_ratio=getattr(args, "context_compaction_ratio", 0.85),
+                session_hard_stop_ratio=getattr(args, "context_hard_stop_ratio", 0.95),
+                session_compaction_keep_recent_items=getattr(args, "sdk_session_compaction_keep_recent_items", 24),
             )
         actors[role] = actor_cls(cache_dir=cache_dir, seed=args.seed, client=client, model=client.model)
     return actors
@@ -343,6 +348,7 @@ def _run_step(
     compactions: list[CampaignMemoryCompaction],
     preserve_head: int,
     preserve_recent: int,
+    memory_mode: str = "campaign",
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     env.run(0)
     observations = {
@@ -368,8 +374,12 @@ def _run_step(
             "before": before_pressure.as_report(),
             "after": after_pressure.as_report(),
         }
-        visible_memory = _emit_visible_memory(env, memory, role, step)
-        observation = add_campaign_memory(observations[role], visible_memory)
+        if memory_mode == "sdk_raw_trajectory":
+            visible_memory = {"mode": "sdk_raw_trajectory", "step": step, "facts": [], "source_event_ids": []}
+            observation = observations[role]
+        else:
+            visible_memory = _emit_visible_memory(env, memory, role, step)
+            observation = add_campaign_memory(observations[role], visible_memory)
         try:
             decision = actors[role].decide(observation)
         except InvalidLLMDecision as exc:
