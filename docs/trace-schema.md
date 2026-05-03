@@ -47,6 +47,14 @@ Audit-only assessment state may appear in trace `state_transition` records, but
 must not appear in defender observations or live `llm_decision.observation`
 payloads.
 
+DS-26 action calibration hooks add a `calibration` object to each
+`action_started` payload. Known records include source families, record id,
+status, confidence, preconditions, expected artifacts, duration range, applied
+duration, and warnings. Missing records emit `status=unvalidated` with
+`missing_calibration_record`. This metadata is reviewer/audit evidence only:
+replay does not load calibration fixtures, and heuristic records must not be
+treated as measured emulation results.
+
 Telemetry events include a `sensor` object when emitted through the Mission Desk
 runtime:
 

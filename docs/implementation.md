@@ -8,6 +8,9 @@ This vertical slice implements the Mission Desk enclave contract as a small acti
 - `badlands.core.attacker_actions`: centralized attacker action surface and
   durations shared by the environment, CLI, live harness, and LLM allowlist.
 - `badlands.core.defender_actions`: centralized defender action surface and durations shared by the environment, CLI, live harness, and LLM allowlist.
+- `badlands.core.calibration`: read-only action calibration record loader and
+  report helpers. `MissionDeskEnv.request()` emits calibration metadata in
+  `action_started` trace events for reviewer audit.
 - `badlands.core.trace.TraceWriter`: append-only JSONL trace with JSON-schema validation.
 - `badlands.core.observations`: separate attacker/defender/green views and forbidden-field leak guard.
 - `badlands.agents.baselines`: do-nothing, isolate-everything, alert-label, evidence-gathering, and random defenders.
@@ -63,6 +66,11 @@ This vertical slice implements the Mission Desk enclave contract as a small acti
   NCSC focus on operational continuity under automated response pressure and to
   arXiv 2604.08805's modelling-gap requirement for realistic green agents,
   observations, and reward evidence.
+- DS-26 calibration hooks: selected attacker and defender actions now reference
+  read-only calibration records for sources, preconditions, expected artifacts,
+  duration ranges, confidence, and explicit warnings. Current records are
+  `heuristic`, not measured calibration; future CALDERA/Mordor/OpTC/NASimEmu/
+  Cyberwheel evidence can update records without changing replay canonicality.
 
 ## Intentional limits
 
@@ -70,8 +78,8 @@ The Docker Compose service is the first local service anchor, but the Python
 environment core currently drives some episode state directly for deterministic
 tests. This avoids premature distributed complexity while preserving
 trace/event/observation/scoring contracts. DS-20 noise/sensor rates, DS-22
-objective durations/artifact rates, and DS-28 workflow/service-profile timings
-are heuristic and scenario-documented; DS-25/DS-26 own stronger provenance and
-calibration. Next validation step: wire more attacker/defender host behavior
-through service/container logs and calibrate workflow rates against mission
-source packs.
+objective durations/artifact rates, DS-26 calibration records, and DS-28
+workflow/service-profile timings are heuristic and scenario-documented. Next
+validation step: wire more attacker/defender host behavior through
+service/container logs and replace selected heuristic calibration records with
+reviewable emulation or replay artifacts.

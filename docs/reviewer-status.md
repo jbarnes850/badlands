@@ -69,13 +69,19 @@
   hidden/cross-role memory rejection tests, and JSONL-only replay.
 - DS-25 adds `docs/realism-provenance.md`, a compact source/local-artifact/
   validation-plan crosswalk for major environment mechanisms.
+- DS-26 adds read-only action calibration records and emits calibration
+  metadata on `action_started` events for selected scan, credential access,
+  lateral movement, collection, isolation, reset, and restore actions. Missing
+  records surface explicit `missing_calibration_record` warnings.
 
 ## Intentionally incomplete
 
 - Some episode actions are still applied in the event core rather than through containers. Risk: not all telemetry is service-generated. Next step: route defender access-control for hosts/users and more attacker file/scan behavior through compose services.
 - IdP and mission app currently share one local Python HTTP process. Risk: fewer deployment and network-boundary side effects than a separately deployed IdP container. Next step: split the IdP into its own compose service once this identity-state contract is stable.
 - Email is represented through ticket-like artifacts, not SMTP/IMAP. Risk: less realistic phishing/report workflow. Next step: add local MailHog-style service or stdlib mailbox endpoint.
-- Durations/rates are contract-informed constants, not yet calibrated from OpTC/LANL/CALDERA. Next step: add calibration fixtures and cite per-action sources.
+- Durations/rates are contract-informed constants. DS-26 records expose
+  per-action sources, ranges, and warnings, but all initial records remain
+  `heuristic` until replay/emulation artifacts are attached.
 - Degraded-mode semantics are service-specific but still heuristic. Risk:
   workflow latency and failure modes are not calibrated to mission-owner
   artifacts. Next step: DS-25/DS-26 provenance/calibration.
@@ -89,6 +95,6 @@
 - DS-29 is a smoke campaign harness, not representative long-horizon evidence.
   The current 32768-token served context remains liveness context unless a
   larger stable context is measured and recorded by role.
-- DS-25 identifies calibration assumptions but does not close them. DS-26 owns
-  selected sim-to-emulation calibration hooks for action durations, artifacts,
-  and preconditions.
+- DS-26 calibration hooks improve auditability but do not run CALDERA,
+  NASimEmu, Cyberwheel, or unsafe tools. The next step is replacing selected
+  heuristic records with reviewed higher-fidelity evidence artifacts.

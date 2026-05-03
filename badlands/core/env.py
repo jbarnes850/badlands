@@ -15,6 +15,7 @@ from typing import Any, Callable
 import badlands.network.mission_app as mission_app
 from badlands.agents.llm import InvalidLLMDecision, LLMDecision
 from badlands.core.attacker_actions import ATTACKER_ACTION_DURATIONS
+from badlands.core.calibration import calibration_metadata
 from badlands.core.defender_actions import DEFENDER_ACTION_DURATIONS
 from badlands.core.dependencies import AVAILABLE, DEGRADED, UNAVAILABLE, DependencyGraph, build_dependency_graph, public_dependency_inventory
 from badlands.core.observations import defender_view
@@ -496,7 +497,17 @@ class MissionDeskEnv:
         parents: list[str] | None = None,
     ) -> str:
         req = self.trace.emit("action_requested", self.now, {"action": action, "params": params}, agent=agent, parents=parents)
-        start = self.trace.emit("action_started", self.now, {"action": action, "duration": duration}, agent=agent, parents=[req])
+        start = self.trace.emit(
+            "action_started",
+            self.now,
+            {
+                "action": action,
+                "duration": duration,
+                "calibration": calibration_metadata(action, applied_duration=duration),
+            },
+            agent=agent,
+            parents=[req],
+        )
         self.schedule(duration, lambda: complete(start))
         return start
 
@@ -644,7 +655,17 @@ class MissionDeskEnv:
     ) -> str:
         parents = [decision_event_id] if decision_event_id else []
         req = self.trace.emit("action_requested", self.now, {"action": action, "params": params}, agent="green", parents=parents)
-        return self.trace.emit("action_started", self.now, {"action": action, "duration": 0}, agent="green", parents=[req])
+        return self.trace.emit(
+            "action_started",
+            self.now,
+            {
+                "action": action,
+                "duration": 0,
+                "calibration": calibration_metadata(action, applied_duration=0),
+            },
+            agent="green",
+            parents=[req],
+        )
 
     def _complete_green_action(self, parent: str | None, action: str, success: bool, outcome: str) -> None:
         if parent is None:

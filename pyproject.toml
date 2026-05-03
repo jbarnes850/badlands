@@ -26,7 +26,7 @@ badlands-agents-sdk-campaign = "badlands.campaigns.agents_sdk_smoke:main"
 include = ["badlands*"]
 
 [tool.setuptools.package-data]
-badlands = ["schemas/*.json", "datasets/*.csv", "datasets/*.md", "scenarios/*.json"]
+badlands = ["schemas/*.json", "datasets/*.csv", "datasets/*.md", "scenarios/*.json", "calibration/*.json"]
 
 [tool.ruff]
 line-length = 100

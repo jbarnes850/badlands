@@ -1,0 +1,163 @@
+[
+  {
+    "id": "cal.scan_network.replay_hooks.v1",
+    "action": "scan_network",
+    "source": ["Mordor/OTRF", "OpTC", "ATT&CK", "NASimEmu"],
+    "source_urls": [
+      "https://github.com/OTRF/mordor",
+      "https://github.com/FiveDirections/OpTC-data",
+      "https://attack.mitre.org/",
+      "https://github.com/jaromiru/NASimEmu"
+    ],
+    "status": "heuristic",
+    "preconditions": ["attacker host has network reachability to modeled service hosts"],
+    "expected_artifacts": [
+      "network connection_attempt telemetry",
+      "service banner output visible to attacker",
+      "optional scan alert when sensor coverage and delay permit"
+    ],
+    "duration_range": [2, 10],
+    "success_notes": "Current duration is inside the contract range and emits bounded service/network telemetry.",
+    "failure_notes": "Blocked by host isolation or unreachable service dependency.",
+    "confidence": "low"
+  },
+  {
+    "id": "cal.credential_access.idp_replay_hooks.v1",
+    "action": "attempt_credential_access",
+    "source": ["LANL auth associations", "OpTC", "Mordor/OTRF", "ATT&CK"],
+    "source_urls": [
+      "https://csr.lanl.gov/data/",
+      "https://github.com/FiveDirections/OpTC-data",
+      "https://github.com/OTRF/mordor",
+      "https://attack.mitre.org/"
+    ],
+    "status": "heuristic",
+    "preconditions": ["credential target exists in scenario", "local IdP accepts credential-use check"],
+    "expected_artifacts": [
+      "credential_access telemetry",
+      "IdP credential-use auth telemetry",
+      "security impact event on successful compromise"
+    ],
+    "duration_range": [3, 15],
+    "success_notes": "Current success is gated by active IdP state and reset races.",
+    "failure_notes": "Credential material can be invalidated by defender reset or account lockout.",
+    "confidence": "low"
+  },
+  {
+    "id": "cal.lateral_move.idp_replay_hooks.v1",
+    "action": "lateral_move",
+    "source": ["LANL auth associations", "NASimEmu", "Mordor/OTRF", "ATT&CK"],
+    "source_urls": [
+      "https://csr.lanl.gov/data/",
+      "https://github.com/jaromiru/NASimEmu",
+      "https://github.com/OTRF/mordor",
+      "https://attack.mitre.org/"
+    ],
+    "status": "heuristic",
+    "preconditions": [
+      "credential target has already been compromised",
+      "target host is reachable and not isolated",
+      "IdP validates credential use"
+    ],
+    "expected_artifacts": [
+      "lateral_movement telemetry",
+      "IdP auth telemetry",
+      "security impact event on movement"
+    ],
+    "duration_range": [2, 10],
+    "success_notes": "Current lateral movement is race-sensitive with defender resets and isolation.",
+    "failure_notes": "Blocked by missing credential, reset/lockout, or target host isolation.",
+    "confidence": "low"
+  },
+  {
+    "id": "cal.collect.file_share_hooks.v1",
+    "action": "collect",
+    "source": ["Mordor/OTRF", "OpTC", "ATT&CK", "CALDERA"],
+    "source_urls": [
+      "https://github.com/OTRF/mordor",
+      "https://github.com/FiveDirections/OpTC-data",
+      "https://attack.mitre.org/",
+      "https://caldera.mitre.org/"
+    ],
+    "status": "heuristic",
+    "preconditions": [
+      "attacker is on protected asset host",
+      "credentialed access exists",
+      "file-share dependency is available",
+      "requested file matches protected asset"
+    ],
+    "expected_artifacts": [
+      "file read telemetry",
+      "collection alert metadata",
+      "security impact event with protected asset reference"
+    ],
+    "duration_range": [5, 20],
+    "success_notes": "Current collection is service/dependency gated and degrades file-share availability.",
+    "failure_notes": "Blocked by missing access, isolation, unavailable file share, or wrong file.",
+    "confidence": "low"
+  },
+  {
+    "id": "cal.isolate_host.response_hooks.v1",
+    "action": "isolate_host",
+    "source": ["NIST SP 800-61", "CISA playbooks", "Cyberwheel", "NCSC"],
+    "source_urls": [
+      "https://csrc.nist.gov/publications/detail/sp/800-61/rev-2/final",
+      "https://www.cisa.gov/news-events/news/incident-and-vulnerability-response-playbooks",
+      "https://github.com/ORNL/cyberwheel",
+      "https://www.ncsc.gov.uk/blogs/why-cyber-defenders-need-to-be-ready-for-frontier-ai"
+    ],
+    "status": "heuristic",
+    "preconditions": ["target host exists in scenario inventory"],
+    "expected_artifacts": [
+      "dependency state change for host",
+      "defense harm event when target is benign or mission critical",
+      "defender action result"
+    ],
+    "duration_range": [1, 3],
+    "success_notes": "Current action updates host availability and records mission blast-radius risk.",
+    "failure_notes": "Unknown host is rejected without side effects.",
+    "confidence": "low"
+  },
+  {
+    "id": "cal.reset_account.idp_response_hooks.v1",
+    "action": "reset_account",
+    "source": ["NIST SP 800-61", "CISA playbooks", "LANL auth associations", "NCSC"],
+    "source_urls": [
+      "https://csrc.nist.gov/publications/detail/sp/800-61/rev-2/final",
+      "https://www.cisa.gov/news-events/news/incident-and-vulnerability-response-playbooks",
+      "https://csr.lanl.gov/data/",
+      "https://www.ncsc.gov.uk/blogs/why-cyber-defenders-need-to-be-ready-for-frontier-ai"
+    ],
+    "status": "heuristic",
+    "preconditions": ["target user exists in local IdP"],
+    "expected_artifacts": [
+      "IdP reset telemetry",
+      "session revocation result",
+      "defense harm event when reset is not evidence-backed"
+    ],
+    "duration_range": [2, 5],
+    "success_notes": "Current reset is authoritative in local IdP state and affects credential races.",
+    "failure_notes": "Unknown user or IdP failure is surfaced as action failure.",
+    "confidence": "low"
+  },
+  {
+    "id": "cal.restore_host_or_service.response_hooks.v1",
+    "action": "restore_host_or_service",
+    "source": ["NIST SP 800-61", "CISA playbooks", "Cyberwheel"],
+    "source_urls": [
+      "https://csrc.nist.gov/publications/detail/sp/800-61/rev-2/final",
+      "https://www.cisa.gov/news-events/news/incident-and-vulnerability-response-playbooks",
+      "https://github.com/ORNL/cyberwheel"
+    ],
+    "status": "heuristic",
+    "preconditions": ["target host or service exists and has a dependency node"],
+    "expected_artifacts": [
+      "dependency state change to available",
+      "defender action result with source_event_ids"
+    ],
+    "duration_range": [5, 20],
+    "success_notes": "Current restore repairs modeled host/service availability only.",
+    "failure_notes": "Unknown target is reported as target_not_restorable without hidden repair.",
+    "confidence": "low"
+  }
+]

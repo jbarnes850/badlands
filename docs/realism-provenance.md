@@ -48,7 +48,7 @@ Status values:
 | Validity ablations | partial | The validity runner checks whether removing realism dimensions changes risk and policy behavior directionally. Supported ablations fail/replay/leak-check explicitly; unsupported advertised ablations fail loudly unless allowed. | arXiv evaluation beyond average reward; NCSC continuous measurement motivation. | `badlands/validity_experiments.py`; `docs/validity-experiments.md`; `tests/test_validity_experiments.py`; `runs/ds23-validity/`. | Current supported set covers persistence, magic observations, no green users, no benign noise, and perfect sensors; instant actions, synchronous turns, security-only scoring, scripted attacker, and identity-graph ablations remain planned. |
 | Live inference and model-output review | implemented | Live LLM validation records endpoint preflight, role isolation, raw/valid/invalid decisions, repairs, token/latency telemetry, replay, qualitative outputs, and decision-quality rubric summaries. | NCSC cost/speed/capability motivation; OpenAI-compatible endpoint requirements; arXiv observation/action/reward audit concerns. | `badlands/live_validate.py`; `docs/dgx-spark-live-inference.md`; `docs/model-output-rubric.md`; `tests/test_live_validate.py`; `tests/test_decision_quality.py`; `runs/run-ledger.jsonl`. | Current 32768-token served context is smoke/liveness evidence, not representative long-horizon capability evidence. |
 | Campaign/session memory | implemented | DS-29 adds role-isolated OpenAI Agents SDK sessions and trace-visible campaign memory while keeping Badlands JSONL canonical for replay/scoring. | OpenAI Agents SDK session strategy docs; arXiv sequence/observation modelling; NCSC continuous measurement motivation. | `badlands/campaigns/agents_sdk_smoke.py`; `badlands/agents/campaign_memory.py`; `docs/agents-sdk-campaign.md`; `tests/test_agents_sdk_campaign.py`; `runs/ds29-live-campaign/`. | Two-step smoke only; memory summarizes prior role-visible decisions, not full long-horizon campaign state. |
-| Sim-to-emulation calibration hooks | planned | Selected abstract actions should eventually be validated against emulation/replay substrates rather than trusted as simulator constants. | CALDERA, NASimEmu, Cyberwheel, Mordor/OpTC, ATT&CK. | `docs/substrate-review.md`; DS-26 Linear issue. | No general emulation adapter exists yet; DS-26 owns the first calibration hooks. |
+| Sim-to-emulation calibration hooks | partial | Selected scan, credential access, lateral movement, collection, isolate, reset, and restore actions emit read-only calibration metadata with source anchors, preconditions, expected artifacts, duration ranges, confidence, and explicit warnings. | CALDERA, NASimEmu, Cyberwheel, Mordor/OpTC, LANL, NIST/CISA, NCSC, ATT&CK. | `badlands/calibration/action_calibration.json`; `badlands/core/calibration.py`; `docs/calibration-hooks.md`; `tests/test_calibration.py`. | Initial records are `heuristic` and low-confidence; no record is `calibrated` until a reviewed replay/emulation artifact is attached. |
 
 ## Unsupported Assumption Ledger
 
@@ -56,7 +56,8 @@ These are allowed only as explicit assumptions until DS-26 or later work closes
 them:
 
 - Action durations, degraded-mode probabilities, and sensor drop/delay values
-  are heuristic smoke values.
+  are heuristic smoke values. DS-26 records expose this status; they do not
+  convert constants into measured calibration.
 - The default mission enclave is compact and local; it is not a production
   enterprise topology.
 - Green workflow rates and roles are scenario-authored, not statistically

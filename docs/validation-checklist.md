@@ -8,10 +8,12 @@ Derived from the virtualisation/modelling-gap taxonomy in arXiv:2604.08805v1 and
 - [x] Host/service behavior includes operational characteristics: availability, degraded/unavailable failure states, user ownership, criticality, and dependencies.
 - [x] Green users generate normal work, auth, files, tickets, and benign noise.
 - [x] Green disruption changes mission score.
-- [ ] Red behavior is calibrated against adversary emulation or ATT&CK-mapped traces.
+- [x] Red behavior carries per-action calibration status and explicit warnings.
+- [ ] Red behavior is measured against adversary emulation or ATT&CK-mapped traces.
 - [ ] Red is not fully deterministic across episodes.
 - [x] Sensor coverage, logging delay, dropped events, and detection noise are explicit.
-- [ ] A higher-fidelity replay/emulation path is identified for at least one attack chain.
+- [x] A higher-fidelity replay/emulation path is identified for selected attack and response actions.
+- [ ] At least one selected action is calibrated against a reviewed replay/emulation artifact.
 
 ## Modelling gap: sequence/time
 
@@ -73,3 +75,12 @@ Derived from the virtualisation/modelling-gap taxonomy in arXiv:2604.08805v1 and
   hooks.
 - [ ] Before external claims, every implemented-realism statement must cite the
   crosswalk row, local artifact, and source anchor it depends on.
+
+## Calibration gate
+
+- [x] Calibration records exist for selected scan, credential access, lateral
+  movement, collection, isolate, reset, and restore actions.
+- [x] Missing action calibration emits an explicit warning/report field.
+- [x] Initial records distinguish `heuristic` from future `calibrated` status.
+- [ ] Any claim of measured calibration cites a reviewable CALDERA, Mordor/OpTC,
+  NASimEmu, Cyberwheel, or mission-owner evidence artifact.
