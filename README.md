@@ -11,6 +11,8 @@ Badlands is not a benchmark leaderboard and not an offensive tool suite. It is a
 contained research environment for studying autonomous cyber decision making,
 co-evolution, and capability curves under mission constraints.
 
+![Badlands self-play environment loop](assets/badlands-system-loop.png)
+
 ## Why This Exists
 
 Real defenders operate under partial observation, noisy telemetry, concurrent
@@ -40,8 +42,6 @@ episode, agents respond to the evolving environment state. Across episodes,
 role-isolated campaign memory carries forward trace-linked lessons without
 sharing hidden labels, scorer truth, or cross-role state.
 
-![Badlands self-play environment loop](assets/badlands-system-loop.png)
-
 Badlands includes:
 
 - an identity provider, mission application, file share, tickets, workstations,
@@ -56,18 +56,6 @@ Badlands includes:
 - a read-only operator dashboard for live campaign inspection.
 
 The default scenario is `badlands/scenarios/mission_desk.json`.
-
-## Live Operator View
-
-The campaign runner also emits a read-only dashboard so operators can watch
-self-play unfold while preserving the JSONL trace as the canonical evidence
-source.
-
-![Badlands live operator dashboard](assets/badlands-operator-dashboard-full.png)
-
-The dashboard surfaces the current agent objectives, latest actions, role token
-spend, latency, invalid decisions, repair pressure, replay status, score trend,
-mission/security effects, and evidence IDs for nonzero scores.
 
 ## What We Measure
 
