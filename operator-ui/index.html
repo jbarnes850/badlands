@@ -825,6 +825,13 @@
       }
 
       function renderLiveLog(traceEvents, operatorEvents) {
+        const liveItems = (window.__badlandsLiveActions || []).map((action) => ({
+          role: action.role || "agent",
+          action: action.action || action.event_type || "decision",
+          detail: action.intent || action.rationale || `episode ${fmt(action.episode)}`,
+          source: { timestamp: `ep ${fmt(action.episode)}`, event_id: action.event_id },
+          important: true,
+        }));
         const traceItems = traceEvents
           .map(eventSummary)
           .map((item, index) => (item ? { ...item, source: traceEvents[index] } : null))
@@ -836,7 +843,7 @@
           source: { timestamp: "-", event_id: event.wall_time },
           important: false,
         }));
-        const items = traceItems.length ? traceItems : operatorItems;
+        const items = liveItems.length ? liveItems : traceItems.length ? traceItems : operatorItems;
         document.getElementById("live-log").innerHTML = items.slice(-12).reverse().map((item) => {
           const source = item.source || {};
           return `<div class="event ${item.important ? "important" : ""}">
@@ -852,11 +859,12 @@
         const tokens = state.tokens || {};
         const latency = state.latency_by_role || {};
         const decisions = Object.fromEntries((episodeReport?.decisions || []).map((item) => [item.role, item]));
+        const liveDecisions = Object.fromEntries((state.live_recent_actions || []).map((item) => [item.role, item]));
         const invalid = state.invalid_decisions || {};
         const repairs = state.repair_pressure || {};
         document.getElementById("roles").innerHTML = roles
           .map((role) => {
-            const decision = decisions[role] || {};
+            const decision = liveDecisions[role] || decisions[role] || {};
             const lat = latency[role] || {};
             return `<article class="lane">
               <div class="lane-head">
@@ -876,7 +884,7 @@
               <div class="decision ${role}">
                 <span class="label">latest decision</span>
                 <div class="value">${safe(decision.action || "pending")}</div>
-                <p class="small mono">${safe(decision.event_id || "no event yet")}</p>
+                <p class="small mono">${safe(decision.event_id || (decision.episode ? `episode ${decision.episode}` : "no event yet"))}</p>
               </div>
             </article>`;
           })
@@ -936,7 +944,7 @@
       }
 
       function renderPaths(paths) {
-        const keep = ["campaign_report", "operator_state", "operator_events", "endpoint_metrics", "last_episode_report"];
+        const keep = ["campaign_report", "operator_state", "operator_live_state", "operator_events", "endpoint_metrics", "last_episode_report"];
         document.getElementById("paths").innerHTML = keep
           .filter((key) => paths[key])
           .map((key) => `<div class="path"><span class="label">${safe(key)}</span><div class="value mono">${safe(paths[key])}</div></div>`)
@@ -963,6 +971,7 @@
         const scenario = await fetchJson(scenarioPath);
         const scores = state.scores || {};
         const trend = state.score_trend_by_episode || [];
+        window.__badlandsLiveActions = state.live_recent_actions || [];
         const latest = trend[trend.length - 1] || {};
         const missionNow = Math.max(0, ...traceEvents.map((event) => Number(event.timestamp) || 0));
         const status = state.status || "unknown";
@@ -1000,7 +1009,7 @@
       }
 
       load();
-      setInterval(load, 2000);
+      setInterval(load, 1000);
     </script>
   </body>
 </html>

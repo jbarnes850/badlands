@@ -26,6 +26,7 @@ badlands-live-validate = "badlands.live_validate:main"
 badlands-validity = "badlands.validity_experiments:main"
 badlands-agents-sdk-campaign = "badlands.campaigns.agents_sdk_smoke:main"
 badlands-campaign-run = "badlands.campaigns.continuous:main"
+badlands-campaign-live-state = "badlands.campaigns.live_state:main"
 
 [tool.setuptools.packages.find]
 include = ["badlands*"]

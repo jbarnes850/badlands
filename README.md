@@ -207,7 +207,8 @@ uv run badlands-campaign-run \
   --seed-start 7000 \
   --out "runs/${RUN_ID}" \
   --sdk-mode direct \
-  --memory-mode campaign \
+  --memory-mode sdk_raw_trajectory \
+  --sdk-session-item-limit none \
   --served-context-target 262144
 ```
 
@@ -222,14 +223,26 @@ uv run badlands-campaign-run \
   --seed-start 7000 \
   --out runs/rehearsal \
   --sdk-mode direct \
-  --memory-mode campaign \
+  --memory-mode sdk_raw_trajectory \
+  --sdk-session-item-limit none \
   --served-context-target 262144
 ```
 
 ## Watch It Happen
 
-The dashboard is static and read-only. It polls `operator-state.json`, the latest
-episode report, operator events, and the latest trace.
+The dashboard is static and read-only. For second-by-second token and action
+updates during long model calls, run the live-state sidecar next to the campaign:
+
+```bash
+uv run badlands-campaign-live-state \
+  --run-dir "runs/${RUN_ID}" \
+  --interval-seconds 1
+```
+
+This writes `operator-live-state.json` from the latest `operator-state.json`,
+in-progress traces, and `agents-sdk-sessions.sqlite`. Replay status and final
+scores still update only after completed episodes because they require a
+completed trace.
 
 From the repository root:
 
@@ -240,7 +253,7 @@ uv run --extra dev python -m http.server 8765 --bind 127.0.0.1
 Open:
 
 ```text
-http://127.0.0.1:8765/operator-ui/?state=/runs/<campaign-id>/operator-state.json
+http://127.0.0.1:8765/operator-ui/?state=/runs/<campaign-id>/operator-live-state.json
 ```
 
 The first screen is the live three-agent interaction:
