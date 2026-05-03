@@ -591,6 +591,7 @@ def _actor_telemetry(
     *,
     validation_error: str | None = None,
 ) -> dict[str, Any]:
+    prompt_token_estimate = int(client_telemetry.get("prompt_token_estimate") or _estimate_tokens(prompt))
     telemetry = {
         "role": actor.role,
         "endpoint": _client_endpoint(actor.client),
@@ -598,7 +599,7 @@ def _actor_telemetry(
         "cache_key": cache_key,
         "cache_path": str(cache_path),
         "cache_hit": cache_hit,
-        "prompt_token_estimate": _estimate_tokens(prompt),
+        "prompt_token_estimate": prompt_token_estimate,
         "completion_tokens": int(client_telemetry.get("completion_tokens") or 0),
         "wall_latency_s": round(time.perf_counter() - started, 6),
         "attempt_count": int(client_telemetry.get("attempt_count") or 0),
@@ -618,6 +619,11 @@ def _actor_telemetry(
         "repair_invalid_count": int(client_telemetry.get("repair_invalid_count") or 0),
         "final_invalid_count": int(client_telemetry.get("final_invalid_count") or 0),
         "parse_failures": int(client_telemetry.get("parse_failures") or 0),
+        "sdk_session_strategy": client_telemetry.get("sdk_session_strategy"),
+        "sdk_session_context_before": client_telemetry.get("sdk_session_context_before"),
+        "sdk_session_context_for_model": client_telemetry.get("sdk_session_context_for_model"),
+        "sdk_session_context_after": client_telemetry.get("sdk_session_context_after"),
+        "sdk_session_compaction": client_telemetry.get("sdk_session_compaction"),
     }
     return telemetry
 

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from badlands.agents.agents_sdk import AgentsSdkCompatClient
+from badlands.agents.llm import AttackerLLM, _actor_telemetry
 from badlands.agents.campaign_memory import CampaignMemoryStore, MemoryFact, assert_no_forbidden_memory, memory_fact_from_decision
 from badlands.agents.context_compaction import CompactionThresholds, compact_role_campaign_memory
 from badlands.campaigns.agents_sdk_smoke import _compact_if_needed, run_campaign
@@ -166,6 +167,28 @@ def test_agents_sdk_session_compaction_uses_sdk_session_primitives(tmp_path: Pat
     assert len(items) < before["item_count"]
     assert "badlands_sdk_session_compaction" in json.dumps(items)
     assert "evt_000000" in record["summary"]
+
+
+def test_actor_telemetry_preserves_sdk_session_token_estimate(tmp_path: Path) -> None:
+    actor = AttackerLLM(cache_dir=tmp_path, seed=1, client=None, model="cached")
+    telemetry = _actor_telemetry(
+        actor,
+        "cache-key",
+        tmp_path / "decision.json",
+        "{\"new\":\"observation\"}",
+        False,
+        0.0,
+        {
+            "prompt_token_estimate": 12345,
+            "completion_tokens": 10,
+            "sdk_session_context_for_model": {"item_count": 8, "token_estimate": 12000},
+            "sdk_session_context_after": {"item_count": 10, "token_estimate": 13000},
+        },
+    )
+
+    assert telemetry["prompt_token_estimate"] == 12345
+    assert telemetry["sdk_session_context_for_model"]["item_count"] == 8
+    assert telemetry["sdk_session_context_after"]["token_estimate"] == 13000
 
 
 def test_campaign_memory_compaction_preserves_sources_and_recent_facts() -> None:
