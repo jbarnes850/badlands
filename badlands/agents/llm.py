@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import time
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,11 +29,12 @@ EVENT_ID_RE = re.compile(r"evt_[0-9]{6}")
 
 
 class InvalidLLMDecision(ValueError):
-    def __init__(self, role: str, raw: dict[str, Any], reason: str):
+    def __init__(self, role: str, raw: dict[str, Any], reason: str, telemetry: dict[str, Any] | None = None):
         super().__init__(reason)
         self.role = role
         self.raw = raw
         self.reason = reason
+        self.telemetry = telemetry or {}
 
 
 @dataclass
@@ -46,6 +48,7 @@ class LLMDecision:
     expected_effect: str
     risk: str
     raw_decision: dict[str, Any] = field(default_factory=dict)
+    inference_telemetry: dict[str, Any] = field(default_factory=dict, compare=False)
 
     @classmethod
     def from_raw(cls, raw: dict[str, Any]) -> LLMDecision:
@@ -75,6 +78,7 @@ class LLMDecision:
             "rationale": self.rationale,
             "expected_effect": self.expected_effect,
             "risk": self.risk,
+            "inference_telemetry": self.inference_telemetry,
         }
 
 
@@ -149,6 +153,7 @@ class OpenAICompatClient:
         self.base_url = (base_url or os.getenv("BADLANDS_LLM_BASE_URL", "")).rstrip("/")
         self.api_key = api_key or os.getenv("BADLANDS_LLM_API_KEY", "EMPTY")
         self.model = model or os.getenv("BADLANDS_LLM_MODEL", "")
+        self.last_completion_telemetry: dict[str, Any] = {}
 
     def complete_json(
         self,
@@ -156,36 +161,146 @@ class OpenAICompatClient:
         *,
         model: str | None = None,
         validator: Callable[[dict[str, Any]], None] | None = None,
+        json_schema: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         last_error: Exception | None = None
-        for attempt in range(3):
-            raw = self._complete(messages, model=model, max_tokens=512 + attempt * 512)
+        telemetry: dict[str, Any] = {
+            "endpoint": self.base_url,
+            "model": model or self.model,
+            "attempt_count": 0,
+            "repair_count": 0,
+            "prompt_token_estimate": _estimate_tokens(json.dumps(messages, sort_keys=True)),
+            "completion_tokens": 0,
+            "wall_latency_s": 0.0,
+            "validation_error": None,
+            "invalid_decision_reason": None,
+            "raw_outputs": [],
+            "initial_invalid_count": 0,
+            "repairs_attempted": 0,
+            "repair_invalid_count": 0,
+            "final_invalid_count": 0,
+            "parse_failures": 0,
+        }
+        started = time.perf_counter()
+        repair_messages: list[dict[str, str]] | None = None
+        for attempt, max_tokens in enumerate((384, 512)):
+            telemetry["attempt_count"] = attempt + 1
+            raw = self._complete(repair_messages or messages, model=model, max_tokens=max_tokens, json_schema=json_schema)
+            telemetry["raw_outputs"].append(
+                {
+                    "attempt": attempt + 1,
+                    "max_tokens": max_tokens,
+                    "content": raw,
+                }
+            )
+            completion_tokens = getattr(self, "_last_completion_tokens", None)
+            telemetry["completion_tokens"] += int(completion_tokens or _estimate_tokens(raw))
             try:
                 parsed = self._parse_json(raw)
                 if validator is not None:
                     validator(parsed)
+                telemetry["wall_latency_s"] = round(time.perf_counter() - started, 6)
+                self.last_completion_telemetry = telemetry
                 return parsed
-            except (json.JSONDecodeError, ValueError) as exc:
+            except json.JSONDecodeError as exc:
                 last_error = exc
-                messages = [
-                    {"role": "system", "content": REPAIR_PROMPT},
-                    {"role": "user", "content": f"Repair this response:\n{raw}"},
-                ]
+                telemetry["validation_error"] = str(exc)
+                telemetry["invalid_decision_reason"] = str(exc)
+                telemetry["parse_failures"] += 1
+                if attempt == 0:
+                    telemetry["initial_invalid_count"] += 1
+                    telemetry["repair_count"] += 1
+                    telemetry["repairs_attempted"] += 1
+                    repair_messages = [
+                        {"role": "system", "content": REPAIR_PROMPT},
+                        {"role": "user", "content": f"Repair this response:\n{raw}"},
+                    ]
+                else:
+                    telemetry["repair_invalid_count"] += 1
+                    telemetry["final_invalid_count"] += 1
+            except InvalidLLMDecision as exc:
+                telemetry["validation_error"] = exc.reason
+                telemetry["invalid_decision_reason"] = exc.reason
+                if attempt == 0:
+                    telemetry["initial_invalid_count"] += 1
+                else:
+                    telemetry["repair_invalid_count"] += 1
+                telemetry["final_invalid_count"] += 1
+                telemetry["wall_latency_s"] = round(time.perf_counter() - started, 6)
+                exc.telemetry = telemetry
+                self.last_completion_telemetry = telemetry
+                raise exc
+            except ValueError as exc:
+                last_error = exc
+                telemetry["validation_error"] = str(exc)
+                telemetry["invalid_decision_reason"] = str(exc)
+                if attempt == 0:
+                    telemetry["initial_invalid_count"] += 1
+                else:
+                    telemetry["repair_invalid_count"] += 1
+                telemetry["final_invalid_count"] += 1
+                telemetry["wall_latency_s"] = round(time.perf_counter() - started, 6)
+                self.last_completion_telemetry = telemetry
+                raise InvalidLLMDecision(
+                    "unknown",
+                    {"raw_outputs": telemetry["raw_outputs"]},
+                    str(exc),
+                    telemetry,
+                ) from exc
         if isinstance(last_error, InvalidLLMDecision):
+            telemetry["wall_latency_s"] = round(time.perf_counter() - started, 6)
+            self.last_completion_telemetry = telemetry
             raise last_error
-        raise ValueError(f"LLM did not return parseable JSON after retries: {last_error}")
+        telemetry["wall_latency_s"] = round(time.perf_counter() - started, 6)
+        self.last_completion_telemetry = telemetry
+        telemetry["final_invalid_count"] = max(1, int(telemetry["final_invalid_count"]))
+        raise InvalidLLMDecision(
+            "unknown",
+            {"raw_outputs": telemetry["raw_outputs"]},
+            f"LLM did not return parseable JSON after retries: {last_error}",
+            telemetry,
+        )
 
-    def _complete(self, messages: list[dict[str, str]], *, model: str | None, max_tokens: int) -> str:
+    def _complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model: str | None,
+        max_tokens: int,
+        json_schema: dict[str, Any] | None = None,
+    ) -> str:
         if not self.base_url or not (model or self.model):
             raise RuntimeError("LLM endpoint/model not configured")
-        body = json.dumps(
-            {
-                "model": model or self.model,
-                "messages": messages,
-                "temperature": 0,
-                "max_tokens": max_tokens,
-                "response_format": {"type": "json_object"},
+        response_format: dict[str, Any]
+        if json_schema is None:
+            response_format = {"type": "json_object"}
+        else:
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "badlands_decision",
+                    "strict": True,
+                    "schema": json_schema,
+                },
             }
+        chat_template_kwargs: dict[str, Any] = {
+            "enable_thinking": os.getenv("BADLANDS_LLM_ENABLE_THINKING", "false").lower() in {"1", "true", "yes"}
+        }
+        body_payload: dict[str, Any] = {
+            "model": model or self.model,
+            "messages": messages,
+            "temperature": 0,
+            "max_tokens": max_tokens,
+            "response_format": response_format,
+            "chat_template_kwargs": chat_template_kwargs,
+        }
+        if json_schema is not None:
+            body_payload["structured_outputs"] = {
+                "json": json_schema,
+                "disable_additional_properties": True,
+            }
+        body = json.dumps(
+            body_payload
         ).encode()
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions",
@@ -196,6 +311,8 @@ class OpenAICompatClient:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read())
         msg = data["choices"][0]["message"]
+        usage = data.get("usage", {})
+        self._last_completion_tokens = int(usage.get("completion_tokens") or 0)
         return msg.get("content") or msg.get("reasoning") or "{}"
 
     @staticmethod
@@ -240,6 +357,7 @@ class CachedLLMActor:
         else:
             self.client = OpenAICompatClient(base_url=role_base_url, api_key=role_api_key, model=model or role_model)
             self.model = model or role_model or self.client.model or "cached"
+        self.last_decision_telemetry: dict[str, Any] = {}
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def decide(self, observation: dict[str, Any]) -> LLMDecision:
@@ -247,21 +365,94 @@ class CachedLLMActor:
         prompt = self._prompt(observation)
         key = hashlib.sha256(json.dumps({"role": self.role, "model": self.model, "seed": self.seed, "prompt": prompt}, sort_keys=True).encode()).hexdigest()[:16]
         path = self.cache_dir / f"{self.role}_{key}.json"
+        cache_hit = path.exists()
+        started = time.perf_counter()
         if path.exists():
             raw = json.loads(path.read_text())
+            telemetry = {
+                "role": self.role,
+                "endpoint": _client_endpoint(self.client),
+                "model": self.model,
+                "cache_key": key,
+                "cache_path": str(path),
+                "cache_hit": True,
+                "prompt_token_estimate": _estimate_tokens(prompt),
+                "completion_tokens": _estimate_tokens(json.dumps(raw, sort_keys=True)),
+                "wall_latency_s": round(time.perf_counter() - started, 6),
+                "attempt_count": 0,
+                "repair_count": 0,
+                "validation_error": None,
+                "invalid_decision_reason": None,
+                "sdk_run_id": None,
+                "sdk_session_id": None,
+                "initial_invalid_count": 0,
+                "repairs_attempted": 0,
+                "repair_invalid_count": 0,
+                "final_invalid_count": 0,
+                "parse_failures": 0,
+            }
         else:
             try:
-                raw = self.client.complete_json([
+                messages = [
                     {"role": "system", "content": self._system_prompt()},
                     {"role": "user", "content": prompt},
-                ], model=self.model if self.model != "cached" else None, validator=lambda candidate: self._validate_decision(candidate, allowed_evidence_ids))
-            except InvalidLLMDecision:
-                raise
+                ]
+                kwargs: dict[str, Any] = {
+                    "model": self.model if self.model != "cached" else None,
+                    "validator": lambda candidate: self._validate_decision(candidate, allowed_evidence_ids),
+                }
+                if isinstance(self.client, OpenAICompatClient):
+                    kwargs["json_schema"] = _decision_json_schema(self.actions, allowed_evidence_ids)
+                raw = self.client.complete_json(messages, **kwargs)
+            except InvalidLLMDecision as exc:
+                client_telemetry = getattr(self.client, "last_completion_telemetry", {}) or exc.telemetry
+                telemetry = _actor_telemetry(
+                    self,
+                    key,
+                    path,
+                    prompt,
+                    cache_hit,
+                    started,
+                    client_telemetry,
+                )
+                raw = exc.raw if exc.raw else {"raw_outputs": telemetry.get("raw_outputs", [])}
+                if telemetry.get("raw_outputs") and isinstance(raw, dict):
+                    raw = {**raw, "raw_outputs": telemetry["raw_outputs"]}
+                raise InvalidLLMDecision(self.role, raw, exc.reason, telemetry) from exc
             except Exception as exc:
-                raise InvalidLLMDecision(self.role, {}, str(exc)) from exc
+                telemetry = _actor_telemetry(
+                    self,
+                    key,
+                    path,
+                    prompt,
+                    cache_hit,
+                    started,
+                    getattr(self.client, "last_completion_telemetry", {}),
+                    validation_error=str(exc),
+                )
+                raise InvalidLLMDecision(self.role, {}, str(exc), telemetry) from exc
             path.write_text(json.dumps(raw, sort_keys=True, indent=2))
-        self._validate_decision(raw, allowed_evidence_ids)
-        return LLMDecision.from_raw(raw)
+            telemetry = _actor_telemetry(
+                self,
+                key,
+                path,
+                prompt,
+                cache_hit,
+                started,
+                getattr(self.client, "last_completion_telemetry", {}),
+            )
+        try:
+            self._validate_decision(raw, allowed_evidence_ids)
+        except InvalidLLMDecision as exc:
+            telemetry["validation_error"] = exc.reason
+            telemetry["invalid_decision_reason"] = exc.reason
+            exc.telemetry = telemetry
+            self.last_decision_telemetry = telemetry
+            raise
+        decision = LLMDecision.from_raw(raw)
+        decision.inference_telemetry = telemetry
+        self.last_decision_telemetry = telemetry
+        return decision
 
     def _validate_decision(self, raw: dict[str, Any], allowed_evidence_ids: set[str] | None = None) -> None:
         missing = [key for key in DECISION_KEYS if key not in raw]
@@ -316,3 +507,69 @@ class AttackerLLM(CachedLLMActor):
 class DefenderLLM(CachedLLMActor):
     role = "defender"
     actions = ("triage_alert", "query_endpoint", "query_identity", "isolate_host", "reset_account", "rollback")
+
+
+def _estimate_tokens(text: str) -> int:
+    return max(1, (len(text) + 3) // 4)
+
+
+def _decision_json_schema(actions: tuple[str, ...], allowed_evidence_ids: set[str]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": list(DECISION_KEYS),
+        "properties": {
+            "intent": {"type": "string", "minLength": 1},
+            "action": {"type": "string", "enum": list(actions)},
+            "parameters": {"type": "object"},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "evidence_ids": {
+                "type": "array",
+                "items": {"type": "string", "enum": sorted(allowed_evidence_ids)},
+            },
+            "rationale": {"type": "string", "minLength": 1},
+            "expected_effect": {"type": "string", "minLength": 1},
+            "risk": {"type": "string", "minLength": 1},
+        },
+    }
+
+
+def _actor_telemetry(
+    actor: CachedLLMActor,
+    cache_key: str,
+    cache_path: Path,
+    prompt: str,
+    cache_hit: bool,
+    started: float,
+    client_telemetry: dict[str, Any],
+    *,
+    validation_error: str | None = None,
+) -> dict[str, Any]:
+    telemetry = {
+        "role": actor.role,
+        "endpoint": _client_endpoint(actor.client),
+        "model": actor.model,
+        "cache_key": cache_key,
+        "cache_path": str(cache_path),
+        "cache_hit": cache_hit,
+        "prompt_token_estimate": _estimate_tokens(prompt),
+        "completion_tokens": int(client_telemetry.get("completion_tokens") or 0),
+        "wall_latency_s": round(time.perf_counter() - started, 6),
+        "attempt_count": int(client_telemetry.get("attempt_count") or 0),
+        "repair_count": int(client_telemetry.get("repair_count") or 0),
+        "validation_error": validation_error or client_telemetry.get("validation_error"),
+        "invalid_decision_reason": validation_error or client_telemetry.get("invalid_decision_reason"),
+        "sdk_run_id": client_telemetry.get("sdk_run_id"),
+        "sdk_session_id": client_telemetry.get("sdk_session_id"),
+        "raw_outputs": client_telemetry.get("raw_outputs", []),
+        "initial_invalid_count": int(client_telemetry.get("initial_invalid_count") or 0),
+        "repairs_attempted": int(client_telemetry.get("repairs_attempted") or 0),
+        "repair_invalid_count": int(client_telemetry.get("repair_invalid_count") or 0),
+        "final_invalid_count": int(client_telemetry.get("final_invalid_count") or 0),
+        "parse_failures": int(client_telemetry.get("parse_failures") or 0),
+    }
+    return telemetry
+
+
+def _client_endpoint(client: Any) -> str:
+    return str(getattr(client, "base_url", "test-client"))

@@ -15,6 +15,7 @@ dev = ["pytest>=8.0", "ruff>=0.6"]
 [project.scripts]
 badlands-episode = "badlands.cli:main"
 badlands-replay = "badlands.scoring.replay:main"
+badlands-live-validate = "badlands.live_validate:main"
 
 [tool.setuptools.packages.find]
 include = ["badlands*"]

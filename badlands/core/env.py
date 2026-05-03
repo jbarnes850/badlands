@@ -273,7 +273,14 @@ class MissionDeskEnv:
             agent=role,
         )
 
-    def green_task(self, i: int) -> None:
+    def green_task(
+        self,
+        i: int,
+        *,
+        selected_action: str | None = None,
+        selected_parameters: dict[str, Any] | None = None,
+        decision_event_id: str | None = None,
+    ) -> None:
         mission_service = self.scenario.mission_service_id
         mission_host = self.scenario.service_host(mission_service)
         mission_file = self.scenario.attacker["collection_target"]
@@ -281,8 +288,15 @@ class MissionDeskEnv:
         weights = [self.state.auth_affinities[u].logons for u in users]
         user = self.rng.choices(users, weights=weights, k=1)[0]
         host = self.state.users[user].host_id
-        decision_action = "use_mission_app"
-        if self.user_simulator is not None:
+        decision_action = selected_action or "use_mission_app"
+        action_parent: str | None = None
+        if selected_action is not None:
+            action_parent = self._start_green_action(
+                selected_action,
+                selected_parameters or {},
+                decision_event_id=decision_event_id,
+            )
+        if selected_action is None and self.user_simulator is not None:
             green_observation = {
                 "user": {"user_id": user, "host_id": host, "role": "mission_analyst"},
                 "workflow": {"task_id": f"task-{i}", "history": self.state.tickets[-5:], "mission_completed": self.state.mission_completed, "mission_failed": self.state.mission_failed},
@@ -298,20 +312,24 @@ class MissionDeskEnv:
                 return
         if decision_action == "create_ticket":
             self._fail_green_task(i, user, host, "green_created_ticket", [])
+            self._complete_green_action(action_parent, decision_action, True, "ticket_created")
             return
         if self.state.hosts[host].isolated or self.state.hosts[mission_host].isolated:
             self._fail_green_task(i, user, host, "defensive_or_service_disruption", [])
+            self._complete_green_action(action_parent, decision_action, False, "defensive_or_service_disruption")
             return
         login = self._idp_login(user, host)
         evidence = login["events"]
         if not login["ok"]:
             self._fail_green_task(i, user, host, login["reason"], evidence)
+            self._complete_green_action(action_parent, decision_action, False, login["reason"])
             return
         session_id = login["session_id"]
         validate = self._idp_validate(user, host, session_id, mission_service)
         evidence.extend(validate["events"])
         if not validate["ok"]:
             self._fail_green_task(i, user, host, validate["reason"], evidence)
+            self._complete_green_action(action_parent, decision_action, False, validate["reason"])
             return
         file_status = self._service_get(f"/file/{mission_file}", user=user, host=host, session_id=session_id)
         evidence.extend(self.ingest_service_logs())
@@ -332,6 +350,7 @@ class MissionDeskEnv:
                 evidence,
                 mission_recorded=True,
             )
+            self._complete_green_action(action_parent, decision_action, False, body.get("reason", "mission_app_auth_failed"))
             return
         self.state.mission_completed += 1
         self.trace.emit(
@@ -347,6 +366,29 @@ class MissionDeskEnv:
             },
             agent="green",
             parents=evidence,
+        )
+        self._complete_green_action(action_parent, decision_action, True, "completed")
+
+    def _start_green_action(
+        self,
+        action: str,
+        params: dict[str, Any],
+        *,
+        decision_event_id: str | None,
+    ) -> str:
+        parents = [decision_event_id] if decision_event_id else []
+        req = self.trace.emit("action_requested", self.now, {"action": action, "params": params}, agent="green", parents=parents)
+        return self.trace.emit("action_started", self.now, {"action": action, "duration": 0}, agent="green", parents=[req])
+
+    def _complete_green_action(self, parent: str | None, action: str, success: bool, outcome: str) -> None:
+        if parent is None:
+            return
+        self.trace.emit(
+            "action_completed",
+            self.now,
+            {"action": action, "success": success, "outcome": outcome, "duration": 0},
+            agent="green",
+            parents=[parent],
         )
 
     def _fail_green_task(
