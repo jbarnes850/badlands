@@ -13,26 +13,6 @@ co-evolution, and capability curves under mission constraints.
 
 ![Badlands self-play environment loop](assets/badlands-system-loop.png)
 
-## Why This Exists
-
-Real defenders operate under partial observation, noisy telemetry, concurrent
-user activity, delayed effects, and mission pressure. A defensive action that
-stops an intrusion can still be a bad action if it blocks the mission.
-
-Recent work on autonomous cyber-defence environments argues that sim-to-real
-failure comes from two coupled gaps: the virtualisation gap between the simulated
-and real network, and the modelling gap induced by observations, actions,
-rewards, and time. That framing is useful because it moves the problem away from
-"can an agent win a game?" and toward "does the environment preserve the
-decision problem we claim to measure?"
-
-The NCSC has made the applied version of the same point: frontier models are
-changing the cost, speed, and scale of cyber operations, while defenders retain
-an advantage only when they can shape their environment, maintain telemetry, and
-respond without creating larger operational failures.
-
-Badlands is an implementation of that measurement stance.
-
 ## Environment Loop
 
 The current release contains a small but complete mission world where attacker
@@ -64,34 +44,6 @@ back to JSONL evidence. The useful claim is not that an agent can attack. The
 useful claim is that a mission owner can repeatedly measure how attacker progress,
 defender quality, mission disruption, token spend, wall-clock time, and campaign
 memory evolve under fixed mission constraints.
-
-## How The Evidence Stays Inspectable
-
-Badlands follows a simple evidence contract:
-
-- the JSONL trace is canonical;
-- scores are replayed from trace events, not hidden labels;
-- every nonzero score must cite trace event IDs;
-- attacker, defender, and green/user agents receive only role-valid observations;
-- campaign memory is extracted only from role-visible events;
-- invalid model behavior is recorded as measurement signal, not silently repaired
-  into success;
-- dashboard state is read-only and derived from run artifacts.
-
-The operator-facing artifacts are written under `runs/<campaign-id>/`:
-
-```text
-campaign-report.json
-operator-state.json
-operator-events.jsonl
-agents-sdk-sessions.sqlite
-live-serving-preflight.json
-endpoint-metrics.jsonl
-episode-000001.jsonl
-episode-000001-report.json
-episode-000002.jsonl
-episode-000002-report.json
-...
 ```
 
 ## Getting Started
@@ -125,7 +77,7 @@ uv run badlands-episode --seed 7 --perfect-sensors --trace runs/perfect-sensors.
 uv run badlands-validity --out runs/validity
 ```
 
-## Bring Your Own Local Models
+## Bring Your Own Models
 
 Badlands expects OpenAI-compatible local chat-completion endpoints. vLLM is the
 primary serving target, but the runner is configured by endpoint URL and model
@@ -179,7 +131,7 @@ Then replay the trace:
 uv run badlands-replay runs/live-validation.jsonl
 ```
 
-## Let The Campaign Run
+## Long-Horizon Runs
 
 The campaign runner repeats episodes until the wall-clock budget expires or a
 hard stop condition fires. It preserves one trace per episode, replays each
@@ -216,7 +168,7 @@ uv run badlands-campaign-run \
   --served-context-target 262144
 ```
 
-## Watch It Happen
+## Dashboard
 
 The dashboard is static and read-only. For second-by-second token and action
 updates during long model calls, run the live-state sidecar next to the campaign:
@@ -243,47 +195,6 @@ Open:
 ```text
 http://127.0.0.1:8765/operator-ui/?state=/runs/<campaign-id>/operator-live-state.json
 ```
-
-The first screen is the live self-play loop. Four cards read left to right
-inside Mission Desk: Green/User, Environment, Attacker, Defender. Each card
-shows the last completed turn for that role, refreshed every second from the
-canonical JSONL trace. The card is not a live token stream; it is the most
-recent JSONL `llm_decision` event with the role's chosen action, the model's
-own rationale, prompt and completion tokens, and wall latency. While a role is
-mid-turn the card stays on the previous decision and the activity badge shows
-"thinking Ns · last evt_xxxxxx" against typical p95 latency for that role.
-
-Below the loop, a per-episode capability curve panel plots risk, cumulative
-token spend, and attacker progress against defender quality so the trend
-across episodes is readable at a glance. Three role pressure cards expose
-context pressure against the served 262,144 budget, SDK session item count,
-invalid decisions, repair pressure, model id, and endpoint. The mission
-effects strip carries the eight scored outcomes for the current episode with
-hover and keyboard tooltips that name the metric and its scoring direction.
-
-Replay status, evidence event IDs, role isolation gates, artifact paths, and
-the operator-events log live behind a single evidence drawer. They are
-secondary by design: the evidence contract is auditable at any time, but the
-loop is what the viewer should see first.
-
-## Where Things Live
-
-```text
-badlands/
-  agents/        role actors, campaign memory, decision quality
-  campaigns/     continuous campaign controller
-  core/          environment, scenario, state, observations, trace
-  datasets/      small public-derived fixtures
-  network/       contained mission services
-  scenarios/     Mission Desk scenario
-  scoring/       replay scorer
-operator-ui/     read-only live dashboard
-infra/           local service compose file
-tests/           unit and integration tests
-```
-
-Generated traces, ledgers, caches, and dashboard state are written to `runs/` and
-are ignored by git.
 
 ## Boundaries
 
