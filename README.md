@@ -11,7 +11,7 @@ Badlands is not a benchmark leaderboard and not an offensive tool suite. It is a
 contained research environment for studying long-horizon cyber decision making
 under mission constraints.
 
-## Motivation
+## Why This Exists
 
 Cyber defence is not a single-step classification problem. Real defenders operate
 under partial observation, noisy telemetry, concurrent user activity, delayed
@@ -32,7 +32,7 @@ respond without creating larger operational failures.
 
 Badlands is an implementation of that measurement stance.
 
-## What This Release Contains
+## The Smallest Useful World
 
 The current release contains a small but complete mission world:
 
@@ -49,7 +49,7 @@ The current release contains a small but complete mission world:
 
 The default scenario is `badlands/scenarios/mission_desk.json`.
 
-## Main Claim
+## What We Measure
 
 Badlands makes cyber self-play measurable by tying every score and headline state
 back to JSONL evidence. The useful claim is not that an agent can attack. The
@@ -57,7 +57,7 @@ useful claim is that a mission owner can repeatedly measure how attacker progres
 defender quality, mission disruption, token spend, wall-clock time, and campaign
 memory evolve under fixed mission constraints.
 
-## Evidence Contract
+## How The Evidence Stays Inspectable
 
 Badlands follows a simple evidence contract:
 
@@ -86,7 +86,7 @@ episode-000002-report.json
 ...
 ```
 
-## Install
+## Getting Started
 
 Badlands uses Python 3.11+ and `uv`.
 
@@ -96,7 +96,7 @@ uv run --extra dev ruff check badlands tests
 uv run --extra dev python -m pytest -q
 ```
 
-## Run A Scripted Episode
+## First Run: No Model Server
 
 This path does not require model serving.
 
@@ -117,7 +117,7 @@ uv run badlands-episode --seed 7 --perfect-sensors --trace runs/perfect-sensors.
 uv run badlands-validity --out runs/validity
 ```
 
-## Configure Local Models
+## Bring Your Own Local Models
 
 Badlands expects OpenAI-compatible local chat-completion endpoints. vLLM is the
 primary serving target, but the runner is configured by endpoint URL and model
@@ -151,7 +151,7 @@ For vLLM, Badlands sends structured JSON response formats and
 `chat_template_kwargs={"enable_thinking": false}`. The preflight fails if the
 endpoint returns reasoning content instead of JSON `message.content`.
 
-## Run A Live Episode With Local Models
+## Run One Live Episode
 
 ```bash
 uv run badlands-live-validate \
@@ -171,7 +171,7 @@ Then replay the trace:
 uv run badlands-replay runs/live-validation.jsonl
 ```
 
-## Run A Continuous Campaign
+## Let The Campaign Run
 
 The campaign runner repeats episodes until the wall-clock budget expires or a
 hard stop condition fires. It preserves one trace per episode, replays each
@@ -206,7 +206,7 @@ uv run badlands-campaign-run \
   --served-context-target 262144
 ```
 
-## Operator Dashboard
+## Watch It Happen
 
 The dashboard is static and read-only. It polls `operator-state.json`, the latest
 episode report, operator events, and the latest trace.
@@ -234,7 +234,7 @@ Metrics follow the interaction surface: elapsed time, tokens, replay status,
 endpoint health, mission score, security score, service downtime, compromised
 credentials, lateral movement, false positives, repairs, and evidence IDs.
 
-## Repository Layout
+## Where Things Live
 
 ```text
 badlands/
@@ -253,7 +253,7 @@ tests/           unit and integration tests
 Generated traces, ledgers, caches, and dashboard state are written to `runs/` and
 are ignored by git.
 
-## Scope And Safety
+## Boundaries
 
 Badlands is a contained local cyber range. It does not provide arbitrary shell
 access, external targeting, agent-authored exploit tooling, model fine-tuning, or
