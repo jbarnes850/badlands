@@ -32,7 +32,7 @@ respond without creating larger operational failures.
 
 Badlands is an implementation of that measurement stance.
 
-## The Smallest Useful World
+## Environment Structure
 
 The current release contains a small but complete mission world:
 
