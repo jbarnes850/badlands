@@ -67,6 +67,8 @@ def derive_scores_with_evidence(events: list[dict[str, Any]]) -> tuple[dict[str,
                 impacted_hosts.add(payload.get("dst", ""))
             elif kind == "collection":
                 _add(score, evidence, "sensitive_files_accessed_count", event)
+            elif kind == "exfiltration":
+                _add(score, evidence, "exfiltration_units", event, int(payload.get("units", 1)))
             elif kind == "service_disruption":
                 _add(score, evidence, "service_disruption_count", event)
         elif event_type == "action_completed" and event.get("agent") == "defender":
@@ -113,6 +115,7 @@ def derive_scores_with_evidence(events: list[dict[str, Any]]) -> tuple[dict[str,
         - score["attacker_dwell_minutes"]
         - 10 * score["lateral_movement_count"]
         - 20 * score["sensitive_files_accessed_count"]
+        - 5 * score["exfiltration_units"]
         - 10 * score["service_disruption_count"]
     )
     score["overall_defense_quality_score"] = score["true_positive_actions"] * 10 - score["false_positive_actions"] * 10 - score["analyst_minutes"]

@@ -9,7 +9,7 @@
 - Event-driven timing with delayed actions and a timing-outcome test.
 - Green mission tasks produce mission value, telemetry, tickets, and disruption penalties; green user choice has a `UserSimulator` / `GreenUserLLM` interface with deterministic cache/replay tests.
 - Defender actions implemented: `triage_alert`, `query_endpoint`, `query_identity`, `isolate_host`, `reset_account`, `rollback`.
-- Attacker actions implemented for local enclave only: `discover_local`, `scan_network`, `attempt_credential_access`, `establish_persistence`, `lateral_move`, `collect`.
+- Attacker actions implemented for local enclave only: `discover_local`, `scan_network`, `attempt_credential_access`, `establish_persistence`, `lateral_move`, `collect`, `exfiltrate`, `disrupt_service`.
 - Scoring derives from trace and has replay test.
 - Baseline defender policies implemented.
 - Ablation tests cover no persistence, magic-observation rejection, and no green users.
@@ -39,6 +39,11 @@
 - Dependency graph is now first-class for hosts, services, users, telemetry, and mission tasks. Propagated `available`/`degraded`/`unavailable` state changes emit `dependency_state_changed` trace events and are pushed into active service endpoints.
 - Defender host isolation and rollback now propagate through service dependencies. Attacker collection from the file-share tier can degrade the file-share dependency and produce mission/security score impact through trace evidence.
 - Replay evidence for service downtime includes dependency-state source events, so blocked dependencies remain auditable from the JSONL trace.
+- Scenario-defined protected assets and attacker objectives now gate
+  collection, exfiltration, and mission-app disruption. Objective completion
+  emits trace-backed telemetry and `security_impact_event` records, and replay
+  scores sensitive collection, exfiltration units, service disruption, and
+  overall security impact from those events.
 
 ## Intentionally incomplete
 
@@ -48,3 +53,6 @@
 - Durations/rates are contract-informed constants, not yet calibrated from OpTC/LANL/CALDERA. Next step: add calibration fixtures and cite per-action sources.
 - Dependency propagation is causal for the compact Mission Desk workflow, but degraded-mode semantics are still coarse: degraded currently blocks current mission work rather than modelling latency, retry, or partial success. Next step: DS-28 for richer workflows and DS-20 for calibrated noise/sensor limits.
 - Mission task templates are scenario fields, and the active service now owns the compact file/ticket workflow. Risk: workflow richness remains limited. Next step: DS-28.
+- DS-22 attacker objective prerequisites and artifacts are ATT&CK-shaped but
+  not yet statistically calibrated to Mordor/OpTC/CALDERA traces. Next step:
+  DS-25/DS-26 provenance and calibration.

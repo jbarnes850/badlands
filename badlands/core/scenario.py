@@ -92,6 +92,7 @@ def validate_scenario(scenario: Scenario) -> None:
     host_ids = scenario.host_ids
     user_ids = scenario.user_ids
     service_ids = scenario.service_ids
+    hosts_by_id = {str(host["host_id"]): host for host in scenario.hosts}
     for user in scenario.users:
         if user["primary_host"] not in host_ids:
             raise ValueError(f"user {user['user_id']} references unknown primary_host {user['primary_host']}")
@@ -136,6 +137,35 @@ def validate_scenario(scenario: Scenario) -> None:
         raise ValueError("attacker.credential_target_user must reference a scenario user")
     if attacker.get("lateral_target_host") not in host_ids:
         raise ValueError("attacker.lateral_target_host must reference a scenario host")
+    protected_assets = attacker.get("protected_assets", [])
+    if not isinstance(protected_assets, list) or not protected_assets:
+        raise ValueError("attacker.protected_assets must define at least one protected asset")
+    asset_ids: set[str] = set()
+    for asset in protected_assets:
+        asset_id = str(asset.get("asset_id", ""))
+        if not asset_id or asset_id in asset_ids:
+            raise ValueError("attacker protected assets must have unique asset_id values")
+        asset_ids.add(asset_id)
+        if asset.get("host_id") not in host_ids:
+            raise ValueError(f"attacker protected asset {asset_id} references unknown host")
+        if asset.get("service_id") not in service_ids:
+            raise ValueError(f"attacker protected asset {asset_id} references unknown service")
+        if not asset.get("file"):
+            raise ValueError(f"attacker protected asset {asset_id} must define file")
+        host = hosts_by_id[str(asset["host_id"])]
+        if str(asset["file"]) not in dict(host.get("files", {})):
+            raise ValueError(f"attacker protected asset {asset_id} references unknown host file")
+    objectives = attacker.get("objectives", [])
+    if not isinstance(objectives, list) or not objectives:
+        raise ValueError("attacker.objectives must define at least one objective")
+    for objective in objectives:
+        objective_type = objective.get("type")
+        if objective_type not in {"collection", "exfiltration", "disruption"}:
+            raise ValueError(f"attacker objective {objective.get('objective_id')} has unsupported type")
+        if objective_type in {"collection", "exfiltration"} and objective.get("asset_id") not in asset_ids:
+            raise ValueError(f"attacker objective {objective.get('objective_id')} references unknown asset")
+        if objective_type == "disruption" and objective.get("service_id") not in service_ids:
+            raise ValueError(f"attacker objective {objective.get('objective_id')} references unknown service")
 
     if not scenario.provenance:
         raise ValueError("scenario must include provenance entries")

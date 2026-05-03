@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from badlands.agents.llm import AttackerLLM, DefenderLLM, GreenUserLLM, InvalidLLMDecision, LLMDecision
+from badlands.core.attacker_actions import ATTACKER_ACTION_DURATIONS
 from badlands.core.defender_actions import DEFENDER_ACTION_DURATIONS
 from badlands.core.env import MissionDeskEnv
 from badlands.core.observations import attacker_view
@@ -20,7 +21,7 @@ from badlands.core.trace import load_trace
 from badlands.scoring.replay import derive_scores
 
 ROLE_ORDER = ("green", "attacker", "defender")
-ATTACK_DURATIONS = {"discover_local": 3, "scan_network": 5, "attempt_credential_access": 6, "establish_persistence": 4, "lateral_move": 5, "collect": 6}
+ATTACK_DURATIONS = ATTACKER_ACTION_DURATIONS
 DEFENDER_DURATIONS = DEFENDER_ACTION_DURATIONS
 
 
@@ -563,7 +564,7 @@ def _qualitative_outputs(events: list[dict[str, Any]]) -> dict[str, list[dict[st
                 "raw_outputs": raw.get("raw_outputs") or telemetry.get("raw_outputs", []),
             }
         )
-    return {role: items[:5] for role, items in out.items()}
+    return out
 
 
 def _failure_classification(preflight_results: list[dict[str, Any]], telemetry: list[dict[str, Any]], events: list[dict[str, Any]]) -> dict[str, Any]:

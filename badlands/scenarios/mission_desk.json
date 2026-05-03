@@ -9,7 +9,41 @@
     "initial_compromised_hosts": ["ws-alice"],
     "credential_target_user": "bob",
     "lateral_target_host": "files-1",
-    "collection_target": "mission.txt"
+    "collection_target": "mission.txt",
+    "protected_assets": [
+      {
+        "asset_id": "mission-package",
+        "file": "mission.txt",
+        "host_id": "files-1",
+        "service_id": "file_share",
+        "sensitivity": 5,
+        "mission_dependency": "use_mission_app"
+      }
+    ],
+    "objectives": [
+      {
+        "objective_id": "collect-mission-package",
+        "type": "collection",
+        "asset_id": "mission-package",
+        "attck": ["TA0009", "T1005"],
+        "validation_source": "ATT&CK Collection / Data from Local System plus Mordor/OpTC file-read telemetry shape"
+      },
+      {
+        "objective_id": "exfiltrate-mission-package",
+        "type": "exfiltration",
+        "asset_id": "mission-package",
+        "attck": ["TA0010", "T1041"],
+        "egress": "contained-sink.badlands.local",
+        "validation_source": "ATT&CK Exfiltration over C2 Channel modelled as contained network telemetry only"
+      },
+      {
+        "objective_id": "disrupt-mission-app",
+        "type": "disruption",
+        "service_id": "mission_app",
+        "attck": ["TA0040", "T1499"],
+        "validation_source": "ATT&CK Impact / Endpoint Denial of Service modelled as dependency degradation"
+      }
+    ]
   },
   "hosts": [
     {"host_id": "ws-alice", "role": "workstation", "owner": "alice", "criticality": 2},
@@ -149,9 +183,9 @@
     {
       "field": "attacker",
       "taxonomy": "virtualisation:threat-simulation",
-      "source": "Mordor/CALDERA/ATT&CK-style intrusion chain used as current validation plan",
-      "url": "https://caldera.mitre.org/",
-      "validation_plan": "Calibrate attacker action prerequisites and artifacts against CALDERA or ATT&CK-mapped replay traces."
+      "source": "Mordor/CALDERA/ATT&CK-style intrusion chain with explicit collection, exfiltration, and impact objectives",
+      "url": "https://attack.mitre.org/",
+      "validation_plan": "Calibrate collection/exfiltration/disruption prerequisites and artifacts against CALDERA abilities or ATT&CK-mapped Mordor/OpTC replay traces."
     },
     {
       "field": "benign_noise",

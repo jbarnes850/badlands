@@ -37,6 +37,8 @@ class WorldState:
     attacker_host: str = "ws-alice"
     attacker_credentials: set[str] = field(default_factory=lambda: {"alice"})
     collected_files: set[str] = field(default_factory=set)
+    exfiltrated_files: set[str] = field(default_factory=set)
+    disrupted_services: set[str] = field(default_factory=set)
     mission_completed: int = 0
     mission_failed: int = 0
     tickets: list[dict] = field(default_factory=list)

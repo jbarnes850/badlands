@@ -17,6 +17,19 @@ Valid LLM actor decisions are recorded as `llm_decision` events with the supplie
 
 Dependency propagation is recorded as `dependency_state_changed`; mission and security score evidence may cite those events through `source_event_ids`.
 
+Attacker objective progress is recorded as trace-backed
+`security_impact_event` records rather than hidden objective state:
+
+- `kind=collection` cites the protected asset, file, host, service, and source
+  action event ids.
+- `kind=exfiltration` cites the protected asset, file, contained egress sink,
+  exfiltration units, and source action event ids.
+- `kind=service_disruption` cites the affected service, dependency status,
+  disruption reason, and dependency-state source event ids.
+
+Replay scores `sensitive_files_accessed_count`, `exfiltration_units`, and
+`service_disruption_count` from these events and their cited evidence.
+
 Defender workflow actions emit delayed `action_completed` results and a paired
 `observation_delivered` event. Query and triage actions expose only role-valid
 artifacts such as source event ids, visible telemetry slices, case notes, and

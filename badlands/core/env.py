@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 import badlands.network.mission_app as mission_app
 from badlands.agents.llm import InvalidLLMDecision, LLMDecision
+from badlands.core.attacker_actions import ATTACKER_ACTION_DURATIONS
 from badlands.core.defender_actions import DEFENDER_ACTION_DURATIONS
 from badlands.core.dependencies import AVAILABLE, DEGRADED, UNAVAILABLE, DependencyGraph, build_dependency_graph, public_dependency_inventory
 from badlands.core.observations import defender_view
@@ -816,7 +817,7 @@ class MissionDeskEnv:
     # Attacker actions
     def attacker(self, action: str, params: dict | None = None, *, decision_event_id: str | None = None) -> None:
         params = params or {}
-        durations = {"discover_local": 3, "scan_network": 5, "attempt_credential_access": 6, "establish_persistence": 4, "lateral_move": 5, "collect": 6}
+        durations = ATTACKER_ACTION_DURATIONS
         self.request(
             "attacker",
             action,
@@ -873,19 +874,156 @@ class MissionDeskEnv:
                 out["stderr"] = f"lateral movement blocked: {credential['reason']}"
             self.telemetry("lateral_movement", {"source.host": self.scenario.attacker["initial_host"], "destination.host": lateral_host, "user.name": credential_user}, parents=[parent])
         elif action == "collect":
-            target = self.scenario.attacker["collection_target"]
-            if self.state.attacker_host == self.scenario.attacker["lateral_target_host"]:
+            asset = self._protected_asset(params.get("asset_id"))
+            target = str(params.get("file", asset["file"]))
+            service = str(asset["service_id"])
+            host = str(asset["host_id"])
+            collection_allowed = (
+                self.state.attacker_host == host
+                and self.scenario.attacker["credential_target_user"] in self.state.attacker_credentials
+                and not self.state.hosts[host].isolated
+                and self.dependency_states.get(self._service_node(service), AVAILABLE) == AVAILABLE
+            )
+            if collection_allowed and target == asset["file"]:
                 self.state.collected_files.add(target)
-                self.trace.emit("security_impact_event", self.now, {"kind": "collection", "file_ref": target}, parents=[parent])
+                impact_id = self.trace.emit(
+                    "security_impact_event",
+                    self.now,
+                    {
+                        "kind": "collection",
+                        "asset_id": asset["asset_id"],
+                        "file_ref": target,
+                        "host_ref": host,
+                        "service": service,
+                        "source_event_ids": [parent],
+                    },
+                    parents=[parent],
+                )
                 self._set_dependency_state(
-                    self._service_node("file_share"),
+                    self._service_node(service),
                     DEGRADED,
                     "attacker_collection_degraded_file_share",
                     parent=parent,
                     agent="attacker",
                 )
-            self.telemetry("file", {"file.path": f"/share/{target}", "event.action": "read"}, parents=[parent])
+                out["stdout"] = f"collected protected asset {asset['asset_id']}:{target}"
+                out["evidence_id"] = impact_id
+            else:
+                out["stderr"] = "collection blocked: missing access, credential, service availability, or protected asset"
+            self.telemetry(
+                "file",
+                {
+                    "event.category": "file",
+                    "event.action": "read",
+                    "event.outcome": "success" if "stderr" not in out else "failure",
+                    "file.path": f"/share/{target}",
+                    "file.name": target,
+                    "host.name": host,
+                    "user.name": self.scenario.attacker["credential_target_user"],
+                    "badlands.alert.rule": "collection",
+                    "badlands.alert.severity": "high",
+                    "badlands.alert.confidence": 0.74,
+                },
+                parents=[parent],
+            )
+        elif action == "exfiltrate":
+            asset = self._protected_asset(params.get("asset_id"))
+            target = str(asset["file"])
+            egress = str(self._objective("exfiltration").get("egress", "contained-sink.badlands.local"))
+            requested_egress = str(params.get("egress", egress))
+            exfil_allowed = (
+                requested_egress == egress
+                and target in self.state.collected_files
+                and not self.state.hosts[self.state.attacker_host].isolated
+                and self.dependency_states.get(self._service_node("telemetry"), AVAILABLE) != UNAVAILABLE
+            )
+            if exfil_allowed:
+                self.state.exfiltrated_files.add(target)
+                impact_id = self.trace.emit(
+                    "security_impact_event",
+                    self.now,
+                    {
+                        "kind": "exfiltration",
+                        "asset_id": asset["asset_id"],
+                        "file_ref": target,
+                        "units": int(asset.get("sensitivity", 1)),
+                        "egress": egress,
+                        "source_event_ids": [parent],
+                    },
+                    parents=[parent],
+                )
+                out["stdout"] = f"exfiltrated {target} to contained sink"
+                out["evidence_id"] = impact_id
+            elif requested_egress != egress:
+                out["stderr"] = "exfiltration blocked: non-contained egress is not allowed"
+            else:
+                out["stderr"] = "exfiltration blocked: asset not collected or route unavailable"
+            self.telemetry(
+                "exfiltration",
+                {
+                    "event.category": "network",
+                    "event.action": "connection_attempt",
+                    "event.outcome": "success" if "stderr" not in out else "failure",
+                    "source.host": self.state.attacker_host,
+                    "destination.domain": egress,
+                    "badlands.egress.request_allowed": requested_egress == egress,
+                    "network.bytes": int(asset.get("sensitivity", 1)) * 1024,
+                    "file.name": target,
+                    "badlands.alert.rule": "exfiltration",
+                    "badlands.alert.severity": "critical",
+                    "badlands.alert.confidence": 0.82,
+                },
+                parents=[parent],
+            )
+        elif action == "disrupt_service":
+            service = str(params.get("service_id", self._objective("disruption").get("service_id", self.scenario.mission_service_id)))
+            if service not in self.scenario.service_ids:
+                out["stderr"] = f"unknown service {service}"
+            elif self.state.attacker_host != self.scenario.attacker["lateral_target_host"] and not self.state.hosts[self.state.attacker_host].persistence:
+                out["stderr"] = "service disruption blocked: insufficient foothold"
+            else:
+                self.state.disrupted_services.add(service)
+                self._set_dependency_state(
+                    self._service_node(service),
+                    UNAVAILABLE,
+                    "attacker_objective_service_disruption",
+                    parent=parent,
+                    agent="attacker",
+                )
+                out["stdout"] = f"degraded mission service {service}"
+            self.telemetry(
+                "service_disruption",
+                {
+                    "event.category": "service",
+                    "event.action": "service_disruption_attempt",
+                    "event.outcome": "success" if "stderr" not in out else "failure",
+                    "service.name": service,
+                    "source.host": self.state.attacker_host,
+                    "badlands.alert.rule": "service_disruption",
+                    "badlands.alert.severity": "critical",
+                    "badlands.alert.confidence": 0.8,
+                },
+                parents=[parent],
+            )
         self.trace.emit("action_completed", self.now, {"action": action, "success": "stderr" not in out, "attacker_output": out, "duration": 1}, agent="attacker", parents=[parent])
+
+    def _protected_asset(self, asset_id: Any | None = None) -> dict[str, Any]:
+        assets = self.scenario.attacker.get("protected_assets", [])
+        if asset_id:
+            for asset in assets:
+                if asset["asset_id"] == asset_id:
+                    return asset
+        target = self.scenario.attacker["collection_target"]
+        for asset in assets:
+            if asset.get("file") == target:
+                return asset
+        return assets[0]
+
+    def _objective(self, objective_type: str) -> dict[str, Any]:
+        for objective in self.scenario.attacker.get("objectives", []):
+            if objective.get("type") == objective_type:
+                return objective
+        return {}
 
     def _service_hosts(self) -> list[str]:
         return [str(service["host_id"]) for service in self.scenario.services]

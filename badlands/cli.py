@@ -8,11 +8,12 @@ from typing import Any, Callable
 from badlands.agents.baselines import POLICIES
 from badlands.agents.llm import AttackerLLM, DefenderLLM, InvalidLLMDecision, LLMDecision
 from badlands.agents.user_simulator import CachedReplayUserSimulator
+from badlands.core.attacker_actions import ATTACKER_ACTION_DURATIONS
 from badlands.core.defender_actions import DEFENDER_ACTION_DURATIONS
 from badlands.core.env import MissionDeskEnv
 from badlands.core.observations import attacker_view
 
-ATTACK_DURATIONS = {"discover_local": 3, "scan_network": 5, "attempt_credential_access": 6, "establish_persistence": 4, "lateral_move": 5, "collect": 6}
+ATTACK_DURATIONS = ATTACKER_ACTION_DURATIONS
 DEFENDER_DURATIONS = DEFENDER_ACTION_DURATIONS
 
 
@@ -120,7 +121,17 @@ def run_episode(args: argparse.Namespace) -> dict:
     if args.attacker_actor == "llm":
         schedule_llm_attacker(env, AttackerLLM(cache_dir=args.llm_cache, seed=args.seed))
     else:
-        for idx, action in enumerate(["discover_local", "scan_network", "attempt_credential_access", "establish_persistence", "lateral_move", "collect"]):
+        actions = [
+            "discover_local",
+            "scan_network",
+            "attempt_credential_access",
+            "establish_persistence",
+            "lateral_move",
+            "collect",
+            "exfiltrate",
+            "disrupt_service",
+        ]
+        for idx, action in enumerate(actions):
             env.schedule(idx * 2, lambda action=action: env.attacker(action))
     if args.defender_actor == "llm":
         schedule_llm_defender(env, DefenderLLM(cache_dir=args.llm_cache, seed=args.seed))

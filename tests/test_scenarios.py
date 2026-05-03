@@ -54,6 +54,21 @@ def test_initial_state_is_fixture_driven(tmp_path: Path):
             "credential_target_user": "alice",
             "lateral_target_host": "files-1",
             "collection_target": "mission.txt",
+            "protected_assets": [
+                {
+                    "asset_id": "mission-package",
+                    "file": "mission.txt",
+                    "host_id": "files-1",
+                    "service_id": "file_share",
+                    "sensitivity": 5,
+                    "mission_dependency": "use_mission_app",
+                }
+            ],
+            "objectives": [
+                {"objective_id": "collect-mission-package", "type": "collection", "asset_id": "mission-package"},
+                {"objective_id": "exfiltrate-mission-package", "type": "exfiltration", "asset_id": "mission-package"},
+                {"objective_id": "disrupt-mission-app", "type": "disruption", "service_id": "mission_app"},
+            ],
         },
         **{"benign_noise.events": []},
     )
@@ -121,3 +136,29 @@ def test_scenario_validates_dependency_references(tmp_path: Path):
         assert "references unknown host/service" in str(exc)
     else:
         raise AssertionError("invalid mission dependency was accepted")
+
+
+def test_scenario_validates_attacker_objective_references(tmp_path: Path):
+    bad_asset = _scenario_copy(tmp_path, **{"attacker.protected_assets": [{"asset_id": "bad", "file": "mission.txt", "host_id": "missing", "service_id": "file_share"}]})
+    try:
+        load_scenario(bad_asset)
+    except ValueError as exc:
+        assert "protected asset bad references unknown host" in str(exc)
+    else:
+        raise AssertionError("invalid protected asset host was accepted")
+
+    bad_objective = _scenario_copy(tmp_path, **{"attacker.objectives": [{"objective_id": "bad-exfil", "type": "exfiltration", "asset_id": "missing"}]})
+    try:
+        load_scenario(bad_objective)
+    except ValueError as exc:
+        assert "bad-exfil references unknown asset" in str(exc)
+    else:
+        raise AssertionError("invalid attacker objective asset was accepted")
+
+    bad_file = _scenario_copy(tmp_path, **{"attacker.protected_assets": [{"asset_id": "missing-file", "file": "absent.txt", "host_id": "files-1", "service_id": "file_share"}]})
+    try:
+        load_scenario(bad_file)
+    except ValueError as exc:
+        assert "protected asset missing-file references unknown host file" in str(exc)
+    else:
+        raise AssertionError("invalid protected asset file was accepted")

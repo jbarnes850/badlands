@@ -40,7 +40,7 @@ Derived from the virtualisation/modelling-gap taxonomy in arXiv:2604.08805v1 and
 
 - [x] Scoring is separate from agent observations.
 - [x] Scoring is auditable from the trace.
-- [ ] Security score penalizes dwell, persistence, credential spread, lateral reach, objective completion, and exfiltration/disruption.
+- [x] Security score penalizes dwell, persistence, credential spread, lateral reach, objective completion, and exfiltration/disruption.
 - [x] Mission score penalizes downtime, user lockouts, missed tasks, ticket backlog, and blocked dependencies.
 - [x] Defensive quality score rewards trace-backed response and penalizes analyst time, false positives, and harmful disruption.
 - [ ] Security-only shutdown policies fail.

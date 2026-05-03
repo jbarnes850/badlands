@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from badlands.core.config import load_env
+from badlands.core.attacker_actions import ATTACKER_ACTIONS
 from badlands.core.defender_actions import DEFENDER_ACTIONS
 
 load_env()
@@ -502,7 +503,7 @@ class GreenUserLLM(CachedLLMActor):
 
 class AttackerLLM(CachedLLMActor):
     role = "attacker"
-    actions = ("discover_local", "scan_network", "attempt_credential_access", "establish_persistence", "lateral_move", "collect")
+    actions = ATTACKER_ACTIONS
 
 
 class DefenderLLM(CachedLLMActor):
