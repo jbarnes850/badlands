@@ -27,6 +27,9 @@ For each issue, execute this loop:
    - `docs/execution-roadmap.md`
    - `docs/validation-matrix.md`
    - `docs/capability-curve-contract.md`
+   - `docs/dgx-spark-live-inference.md`
+   - `docs/run-ledger.md`
+   - `docs/decisions.md`
    - issue-specific docs named by Linear.
 3. Search historical Codex session logs for relevant prior context before
    repeating architecture work.
@@ -52,12 +55,16 @@ For each issue, execute this loop:
      reasoning;
    - green/user mission realism;
    - invalid, brittle, repeated, or hidden-state behavior.
-8. Run a subagent-driven review pass to reduce executor bias.
-9. Fix blocking findings and repeat verification.
-10. Append meaningful acceptance, live, campaign, ablation, or blocker runs to
+8. Append meaningful acceptance, live, campaign, ablation, or blocker runs to
     `runs/run-ledger.jsonl` using `docs/run-ledger.schema.json`.
-11. Commit in logical chunks.
-12. Update Linear with:
+9. Run a subagent-driven review pass over the final diff, validation evidence,
+   trace/report artifacts, qualitative inspection, and ledger entry to reduce
+   executor bias.
+10. Fix blocking findings and repeat verification, ledger update, and review.
+11. Commit approved changes in logical chunks.
+12. Run a final lightweight reviewer check if the commit differs from the
+    reviewed diff or if ledger/report paths changed.
+13. Update Linear with:
     - commits;
     - validation commands and results;
     - live command and result;
@@ -65,7 +72,7 @@ For each issue, execute this loop:
     - qualitative output summary;
     - residual risks;
     - reviewer status.
-13. Move to the next issue only if the current issue reaches the quality bar and
+14. Move to the next issue only if the current issue reaches the quality bar and
     no stop condition fired.
 
 ## Historical session context
@@ -187,6 +194,17 @@ Follow the lane in `docs/execution-roadmap.md`:
 DS-20 -> DS-21 -> DS-22 -> DS-28 -> DS-27 -> DS-23 -> DS-29 -> DS-25/DS-26
 ```
 
-Execute one issue at a time. The first overnight run should prefer `DS-20`
-only, or at most continue to `DS-21` if `DS-20` is fully verified and approved
-by the reviewer protocol.
+Execute one issue at a time.
+
+Conservative dry-run mode:
+
+- Prefer `DS-20` only.
+- Continue to `DS-21` only if `DS-20` is fully verified and approved by the
+  reviewer protocol.
+
+Full-roadmap night-shift mode:
+
+- Continue through the lane when, and only when, each issue is independently
+  planned, implemented, verified, live-validated, qualitatively inspected,
+  ledgered, reviewed, approved, committed, and updated in Linear.
+- Stop immediately on any `BLOCKED` reviewer outcome or stop condition.
