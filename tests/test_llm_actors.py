@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -70,6 +72,67 @@ def test_role_action_boundaries_with_cached_fake(tmp_path: Path):
 def test_json_parser_extracts_markdown_wrapped_object():
     parsed = OpenAICompatClient._parse_json('thinking...```json\n{"intent":"x","action":"scan_network","parameters":{},"confidence":0.5,"evidence_ids":[],"rationale":"visible service","expected_effect":"scan services","risk":"creates telemetry"}\n```')
     assert parsed["action"] == "scan_network"
+
+
+def test_openai_client_sends_vllm_structured_decision_config(monkeypatch: pytest.MonkeyPatch):
+    captured: dict[str, object] = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "choices": [{"message": {"content": '{"action":"scan_network"}'}}],
+                    "usage": {"completion_tokens": 5},
+                }
+            ).encode()
+
+    def fake_urlopen(req, timeout):
+        captured["body"] = json.loads(req.data.decode())
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    client = OpenAICompatClient(base_url="http://llm.local/v1", api_key="EMPTY", model="model")
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["action"],
+        "properties": {"action": {"type": "string", "enum": ["scan_network"]}},
+    }
+    client._complete([{"role": "user", "content": "choose"}], model=None, max_tokens=32, json_schema=schema)
+    body = captured["body"]
+    assert body["response_format"]["type"] == "json_schema"
+    assert body["response_format"]["json_schema"]["strict"] is True
+    assert body["response_format"]["json_schema"]["schema"] == schema
+    assert body["structured_outputs"]["json"] == schema
+    assert body["structured_outputs"]["disable_additional_properties"] is True
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+def test_repair_count_counts_attempts_not_failures():
+    class MalformedTwiceClient(OpenAICompatClient):
+        def __init__(self):
+            self.base_url = "fake"
+            self.api_key = "fake"
+            self.model = "fake"
+
+        def _complete(self, messages, *, model=None, max_tokens=512, json_schema=None):
+            return '{"intent": "truncated"'
+
+    client = MalformedTwiceClient()
+    with pytest.raises(InvalidLLMDecision) as err:
+        client.complete_json([{"role": "user", "content": "bad"}], validator=lambda raw: None)
+    assert err.value.telemetry["parse_failures"] == 2
+    assert err.value.telemetry["repair_count"] == 1
+    assert err.value.telemetry["repairs_attempted"] == 1
+    assert err.value.telemetry["repair_invalid_count"] == 1
+    assert err.value.telemetry["final_invalid_count"] == 1
 
 
 def test_dotenv_loader_integrates_role_endpoints(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -156,8 +219,10 @@ def test_validator_retry_exhaustion_preserves_invalid_decision(tmp_path: Path):
             self.base_url = "fake"
             self.api_key = "fake"
             self.model = "fake"
+            self.calls = 0
 
-        def _complete(self, messages, *, model=None, max_tokens=512):
+        def _complete(self, messages, *, model=None, max_tokens=512, json_schema=None):
+            self.calls += 1
             return (
                 '{"intent":"bad evidence","action":"query_endpoint",'
                 '"parameters":{"host_id":"ws-alice"},"confidence":0.7,'
@@ -167,12 +232,15 @@ def test_validator_retry_exhaustion_preserves_invalid_decision(tmp_path: Path):
                 '"risk":"The cited evidence is not replayable."}'
             )
 
+    client = ExhaustingClient()
     with pytest.raises(InvalidLLMDecision) as err:
-        DefenderLLM(cache_dir=tmp_path, seed=1, client=ExhaustingClient()).decide(
+        DefenderLLM(cache_dir=tmp_path, seed=1, client=client).decide(
             {"telemetry": [{"event_id": "evt_000123", "ecs": {"host.name": "ws-alice"}}]}
         )
     assert err.value.raw["evidence_ids"] == ["telemetry_001", "telemetry_002"]
     assert "evidence_ids not present" in err.value.reason
+    assert client.calls == 1
+    assert err.value.telemetry["repair_count"] == 0
 
 
 def test_llm_transport_failure_becomes_invalid_decision(tmp_path: Path):
