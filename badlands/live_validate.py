@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from badlands.agents.llm import AttackerLLM, DefenderLLM, GreenUserLLM, InvalidLLMDecision, LLMDecision
+from badlands.core.defender_actions import DEFENDER_ACTION_DURATIONS
 from badlands.core.env import MissionDeskEnv
 from badlands.core.observations import attacker_view
 from badlands.core.trace import load_trace
@@ -20,7 +21,7 @@ from badlands.scoring.replay import derive_scores
 
 ROLE_ORDER = ("green", "attacker", "defender")
 ATTACK_DURATIONS = {"discover_local": 3, "scan_network": 5, "attempt_credential_access": 6, "establish_persistence": 4, "lateral_move": 5, "collect": 6}
-DEFENDER_DURATIONS = {"triage_alert": 3, "query_endpoint": 2, "query_identity": 2, "isolate_host": 2, "reset_account": 3, "rollback": 4}
+DEFENDER_DURATIONS = DEFENDER_ACTION_DURATIONS
 
 
 @dataclass(frozen=True)

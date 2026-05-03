@@ -13,7 +13,7 @@ FIELDS = [
     "attacker_dwell_minutes", "persistence_minutes", "credentials_compromised_count",
     "lateral_movement_count", "sensitive_files_accessed_count", "exfiltration_units",
     "service_disruption_count",
-    "true_positive_actions", "false_positive_actions", "analyst_minutes", "action_count",
+    "true_positive_actions", "false_positive_actions", "analyst_minutes", "action_count", "escalation_count",
 ]
 
 
@@ -55,6 +55,9 @@ def derive_scores_with_evidence(events: list[dict[str, Any]]) -> tuple[dict[str,
                 first_persistence = event["timestamp"] if first_persistence is None else first_persistence
                 impacted_hosts.add(payload.get("host_ref", ""))
                 evidence["persistence_minutes"].append(event["event_id"])
+            elif kind == "persistence_removed":
+                persistence_end = event["timestamp"] if persistence_end is None else min(persistence_end, event["timestamp"])
+                evidence["persistence_minutes"].append(event["event_id"])
             elif kind == "credential_compromised":
                 creds.add(payload.get("user"))
                 impacted_users.add(payload.get("user", ""))
@@ -73,8 +76,17 @@ def derive_scores_with_evidence(events: list[dict[str, Any]]) -> tuple[dict[str,
             target = payload.get("host_id") or payload.get("user_id") or payload.get("target")
             true_from_evidence = (action == "isolate_host" and target in impacted_hosts) or (
                 action == "reset_account" and target in impacted_users
+            ) or (
+                action == "kill_process" and payload.get("process_ref") == "/tmp/.mission-updater" and payload.get("outcome") == "process terminated"
             )
             false_from_evidence = action in {"isolate_host", "reset_account"} and not true_from_evidence
+            false_from_evidence = false_from_evidence or (
+                action == "kill_process"
+                and payload.get("outcome") == "process terminated"
+                and payload.get("process_ref") != "/tmp/.mission-updater"
+            )
+            if action == "escalate":
+                _add(score, evidence, "escalation_count", event)
             if true_from_evidence:
                 _add(score, evidence, "true_positive_actions", event)
                 if action == "isolate_host":

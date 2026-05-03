@@ -25,13 +25,16 @@ def alert_label_defender(observation: dict[str, Any], *, seed: int = 1, magic: b
 
 def evidence_gathering_defender(observation: dict[str, Any], *, seed: int = 1, magic: bool = False) -> list[Action]:
     if not observation.get("alerts"):
-        return [("query_endpoint", {"host_id": "ws-alice"})]
+        return [("query_endpoint", {"host_id": "ws-alice"}), ("query_network", {"host_id": "ws-alice"})]
     return [
         ("triage_alert", {"alert_id": "latest"}),
         ("query_identity", {"user_id": "alice"}),
+        ("query_network", {"host_id": "ws-alice"}),
+        ("escalate", {"case_id": "case-latest"}),
         ("reset_account", {"user_id": "bob"}),
         ("reset_account", {"user_id": "carol"}),
         ("isolate_host", {"host_id": "ws-alice"}),
+        ("restore_host_or_service", {"target": "mission_app"}),
     ]
 
 
@@ -40,8 +43,10 @@ def random_defender(observation: dict[str, Any], *, seed: int = 1, magic: bool =
     actions: list[Action] = [
         ("query_endpoint", {"host_id": "ws-alice"}),
         ("query_identity", {"user_id": "alice"}),
+        ("query_network", {"host_id": "ws-alice"}),
         ("isolate_host", {"host_id": "ws-bob"}),
         ("reset_account", {"user_id": "bob"}),
+        ("block_indicator", {"type": "host", "value": "app-1", "scope": "enclave"}),
     ]
     return [rng.choice(actions) for _ in range(3)]
 

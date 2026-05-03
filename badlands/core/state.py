@@ -43,6 +43,7 @@ class WorldState:
     alerts: list[dict] = field(default_factory=list)
     telemetry: list[dict] = field(default_factory=list)
     cases: list[dict] = field(default_factory=list)
+    blocked_indicators: set[tuple[str, str]] = field(default_factory=set)
     auth_affinities: dict[str, AuthAffinity] = field(default_factory=dict)
     scenario: Scenario | None = None
 

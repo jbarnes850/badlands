@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from badlands.core.config import load_env
+from badlands.core.defender_actions import DEFENDER_ACTIONS
 
 load_env()
 
@@ -506,7 +507,7 @@ class AttackerLLM(CachedLLMActor):
 
 class DefenderLLM(CachedLLMActor):
     role = "defender"
-    actions = ("triage_alert", "query_endpoint", "query_identity", "isolate_host", "reset_account", "rollback")
+    actions = DEFENDER_ACTIONS
 
 
 def _estimate_tokens(text: str) -> int:

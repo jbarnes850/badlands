@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 import badlands.network.mission_app as mission_app
 from badlands.agents.llm import InvalidLLMDecision, LLMDecision
+from badlands.core.defender_actions import DEFENDER_ACTION_DURATIONS
 from badlands.core.dependencies import AVAILABLE, DEGRADED, UNAVAILABLE, DependencyGraph, build_dependency_graph, public_dependency_inventory
 from badlands.core.observations import defender_view
 from badlands.core.scenario import Scenario
@@ -396,12 +397,15 @@ class MissionDeskEnv:
                 parents=[parent, *events],
             )
         elif kind == "noisy_script":
+            process_name = str(item.get("process", "mission-cache-refresh"))
+            if host in self.state.hosts and process_name not in self.state.hosts[host].processes:
+                self.state.hosts[host].processes.append(process_name)
             self.telemetry(
                 "persistence",
                 {
                     "event.category": "process",
                     "event.action": "start",
-                    "process.name": str(item.get("process", "mission-cache-refresh")),
+                    "process.name": process_name,
                     "process.command_line": str(item.get("command_line", "mission-cache-refresh --sync")),
                     "host.name": host,
                     "user.name": user,
@@ -852,6 +856,7 @@ class MissionDeskEnv:
         elif action == "establish_persistence":
             if not self.no_persistence:
                 self.state.hosts[self.state.attacker_host].persistence = True
+                self.state.hosts[self.state.attacker_host].processes.append("/tmp/.mission-updater")
                 self.trace.emit("security_impact_event", self.now, {"kind": "persistence_active", "host_ref": self.state.attacker_host}, parents=[parent])
             self.telemetry("persistence", {"file.path": "/tmp/.mission-updater", "host.name": self.state.attacker_host}, parents=[parent])
         elif action == "lateral_move":
@@ -900,7 +905,7 @@ class MissionDeskEnv:
     # Defender actions
     def defender(self, action: str, params: dict | None = None, *, decision_event_id: str | None = None) -> None:
         params = params or {}
-        durations = {"triage_alert": 3, "query_endpoint": 2, "query_identity": 2, "isolate_host": 2, "reset_account": 3, "rollback": 4}
+        durations = DEFENDER_ACTION_DURATIONS
         self.request(
             "defender",
             action,
@@ -913,14 +918,51 @@ class MissionDeskEnv:
     def _complete_defender(self, action: str, params: dict, parent: str, duration: int) -> None:
         payload = {"action": action, "success": True, "duration": duration}
         if action == "triage_alert":
-            payload["case_note"] = "linked source telemetry reviewed"
+            alert_id = params.get("alert_id", "latest")
+            linked = self._resolve_alert_source_ids(alert_id)
+            payload.update(
+                {
+                    "case_id": self._case_id(alert_id),
+                    "alert_id": alert_id,
+                    "case_note": "linked source telemetry reviewed",
+                    "source_event_ids": linked,
+                }
+            )
         elif action == "query_endpoint":
             host = params.get("host_id", self.scenario.attacker["initial_host"])
-            payload["events"] = self._visible_telemetry(host=host)[:5]
+            payload.update({"host_id": host, "events": self._visible_telemetry(host=host)[-5:]})
         elif action == "query_identity":
-            payload["auth_events"] = self._visible_telemetry(category="auth")[-5:]
+            user = params.get("user_id")
+            auth_events = self._visible_telemetry(category="auth")[-8:]
+            if user:
+                auth_events = [item for item in auth_events if item.get("ecs", {}).get("user.name") == user]
+            payload.update({"user_id": user, "auth_events": auth_events[-5:]})
+        elif action == "query_network":
+            host = params.get("host_id")
+            indicator = params.get("indicator") or params.get("value")
+            network_events = self._visible_telemetry(category="network")
+            if host:
+                network_events = [
+                    item for item in network_events
+                    if host in {item.get("ecs", {}).get("source.host"), item.get("ecs", {}).get("destination.host")}
+                ]
+            if indicator:
+                network_events = [item for item in network_events if indicator in json.dumps(item.get("ecs", {}), sort_keys=True)]
+            payload.update(
+                {
+                    "host_id": host,
+                    "indicator": indicator,
+                    "network_events": network_events[-5:],
+                    "case_note": "network flow and DNS evidence reviewed",
+                }
+            )
         elif action == "isolate_host":
             host = params.get("host_id", self.scenario.attacker["initial_host"])
+            if host not in self.state.hosts:
+                payload.update({"success": False, "host_id": host, "outcome": "unknown_host"})
+                completed_event = self.trace.emit("action_completed", self.now, payload, agent="defender", parents=[parent])
+                self.trace.emit("observation_delivered", self.now, {"to": "defender", "result_action": action, "source_event_ids": [completed_event]}, agent="defender", parents=[completed_event])
+                return
             self.state.hosts[host].isolated = True
             payload["host_id"] = host
             payload["outcome"] = "host network access policy updated"
@@ -947,6 +989,115 @@ class MissionDeskEnv:
             self.trace.emit("state_transition", self.now, {"kind": "defender_action_assessment", "action": action, "target": user, "audit_true_positive": audit_true_positive}, parents=[parent])
             if not audit_true_positive:
                 self.trace.emit("defense_harm_event", self.now, {"field": "user_lockout_minutes", "minutes": 10, "user": user, "reason": "reset_user_ticket", "source_event_ids": reset["events"]}, agent="defender", parents=[parent, *reset["events"]])
+        elif action == "block_indicator":
+            indicator_type = str(params.get("type", "host"))
+            value = str(params.get("value", params.get("host_id", self.scenario.service_host(self.scenario.mission_service_id))))
+            scope = str(params.get("scope", "enclave"))
+            payload.update(
+                {
+                    "indicator_type": indicator_type,
+                    "indicator_value": value,
+                    "scope": scope,
+                    "case_note": "block applied with mission blast-radius risk",
+                }
+            )
+            source_event_ids: list[str] = []
+            if indicator_type in {"host", "service"}:
+                target = value
+                if indicator_type == "host" and target in self.state.hosts:
+                    source_event_ids = self._set_dependency_state(
+                        self._host_node(target),
+                        DEGRADED,
+                        "defender_indicator_block",
+                        parent=parent,
+                        agent="defender",
+                    )
+                elif indicator_type == "service" and target in self.scenario.service_ids:
+                    source_event_ids = self._set_dependency_state(
+                        self._service_node(target),
+                        DEGRADED,
+                        "defender_indicator_block",
+                        parent=parent,
+                        agent="defender",
+                    )
+            if source_event_ids:
+                self.state.blocked_indicators.add((indicator_type, value))
+                payload["source_event_ids"] = source_event_ids
+                payload["outcome"] = "indicator block applied"
+            else:
+                payload.update(
+                    {
+                        "success": False,
+                        "outcome": "unsupported_or_unmatched_indicator",
+                        "source_event_ids": [],
+                    }
+                )
+        elif action == "kill_process":
+            host = str(params.get("host_id", self.scenario.attacker["initial_host"]))
+            process_ref = str(params.get("process_ref", params.get("process_name", "mission-cache-refresh")))
+            payload.update({"host_id": host, "process_ref": process_ref})
+            if host not in self.state.hosts:
+                payload.update({"success": False, "outcome": "unknown_host"})
+            elif process_ref in self.state.hosts[host].processes:
+                self.state.hosts[host].processes.remove(process_ref)
+                payload["outcome"] = "process terminated"
+                if process_ref == "/tmp/.mission-updater":
+                    self.state.hosts[host].persistence = False
+                    impact_id = self.trace.emit(
+                        "security_impact_event",
+                        self.now,
+                        {"kind": "persistence_removed", "host_ref": host, "process_ref": process_ref},
+                        agent="defender",
+                        parents=[parent],
+                    )
+                    payload["source_event_ids"] = [impact_id]
+                if process_ref.startswith("mission") or process_ref in {"analyst-workbench", "mission-app"}:
+                    self.trace.emit(
+                        "defense_harm_event",
+                        self.now,
+                        {"field": "benign_process_kills", "minutes": 1, "host_id": host, "process_ref": process_ref, "reason": "benign_process_killed"},
+                        agent="defender",
+                        parents=[parent],
+                    )
+            else:
+                payload.update({"success": False, "outcome": "process_not_found"})
+        elif action == "restore_host_or_service":
+            target = str(params.get("target", params.get("host_id", params.get("service_id", self.scenario.mission_service_id))))
+            payload["target"] = target
+            source_event_ids: list[str] = []
+            if target in self.state.hosts:
+                self.state.hosts[target].isolated = False
+                source_event_ids.extend(
+                    self._set_dependency_state(
+                        self._host_node(target),
+                        AVAILABLE,
+                        "defender_restore",
+                        parent=parent,
+                        agent="defender",
+                    )
+                )
+            if target in self.scenario.service_ids:
+                source_event_ids.extend(
+                    self._set_dependency_state(
+                        self._service_node(target),
+                        AVAILABLE,
+                        "defender_restore",
+                        parent=parent,
+                        agent="defender",
+                    )
+                )
+            payload["source_event_ids"] = source_event_ids
+            payload["success"] = bool(source_event_ids)
+            payload["outcome"] = "availability restored" if source_event_ids else "target_not_restorable"
+        elif action == "escalate":
+            case_id = str(params.get("case_id", "case-latest"))
+            payload.update(
+                {
+                    "case_id": case_id,
+                    "case_note": "escalated for senior review and mission-owner coordination",
+                    "outcome": "case escalated; higher analyst cost accepted",
+                }
+            )
         elif action == "rollback":
             target = params.get("target", self.scenario.attacker["initial_host"])
             if target in self.state.hosts:
@@ -968,7 +1119,29 @@ class MissionDeskEnv:
                 )
             if target in self.state.users:
                 self._service_post_json("/idp/unlock", {"user": target, "host": "defender"}, user="defender")
-                self.ingest_service_logs()
+                payload["source_event_ids"] = self.ingest_service_logs()
+            for indicator in list(self.state.blocked_indicators):
+                if target in indicator:
+                    self.state.blocked_indicators.remove(indicator)
             payload["target"] = target
-        self.trace.emit("action_completed", self.now, payload, agent="defender", parents=[parent])
-        self.trace.emit("observation_delivered", self.now, {"to": "defender", "result_action": action, "source_event_ids": [parent]}, agent="defender", parents=[parent])
+        completed_event = self.trace.emit("action_completed", self.now, payload, agent="defender", parents=[parent])
+        self.trace.emit("observation_delivered", self.now, {"to": "defender", "result_action": action, "source_event_ids": [completed_event]}, agent="defender", parents=[completed_event])
+
+    def _resolve_alert_source_ids(self, alert_id: Any) -> list[str]:
+        if not self.trace.events:
+            return []
+        alerts = [event for event in self.trace.events if event["type"] == "alert_emitted"]
+        if not alerts:
+            return []
+        if alert_id and alert_id != "latest":
+            matched = [event for event in alerts if event["event_id"] == alert_id or event["payload"].get("rule_id") == alert_id]
+            if matched:
+                return [matched[-1]["event_id"], *matched[-1]["payload"].get("source_event_ids", [])]
+        latest = alerts[-1]
+        return [latest["event_id"], *latest["payload"].get("source_event_ids", [])]
+
+    def _case_id(self, alert_id: Any) -> str:
+        base = str(alert_id or "latest").replace("evt_", "case-")
+        if base == "latest":
+            return "case-latest"
+        return base if base.startswith("case-") else f"case-{base}"

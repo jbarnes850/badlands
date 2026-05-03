@@ -5,6 +5,7 @@ This vertical slice implements the Mission Desk enclave contract as a small acti
 ## Runtime pieces
 
 - `badlands.core.env.MissionDeskEnv`: event-driven active network world. Owns hidden host, identity, mission, telemetry, attacker, and defender state.
+- `badlands.core.defender_actions`: centralized defender action surface and durations shared by the environment, CLI, live harness, and LLM allowlist.
 - `badlands.core.trace.TraceWriter`: append-only JSONL trace with JSON-schema validation.
 - `badlands.core.observations`: separate attacker/defender/green views and forbidden-field leak guard.
 - `badlands.agents.baselines`: do-nothing, isolate-everything, alert-label, evidence-gathering, and random defenders.
@@ -27,6 +28,17 @@ This vertical slice implements the Mission Desk enclave contract as a small acti
 - Observation modelling: telemetry carries sensor coverage/drop/delay metadata;
   defender observations only expose covered, non-dropped, currently visible
   artifacts, while the JSONL trace remains canonical for replay.
+- DS-21 defender workflow: triage/query/escalate/contain/restore/rollback
+  actions map to NIST/CISA incident response phases. `triage_alert`,
+  `query_endpoint`, `query_identity`, and `query_network` support detection,
+  analysis, scoping, and evidence preservation. `isolate_host`,
+  `reset_account`, `block_indicator`, and `kill_process` model containment and
+  mitigation with explicit blast-radius risk. `restore_host_or_service` and
+  `rollback` model recovery and reversal of harmful response. `escalate`
+  models case coordination at analyst-time cost. `block_indicator` is aligned
+  with OpenC2-style deny/block concepts, while `isolate_host`,
+  `reset_account`, and `kill_process` correspond to common D3FEND/OpenC2
+  containment and eviction concepts.
 
 ## Intentional limits
 

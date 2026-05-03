@@ -17,6 +17,16 @@ Valid LLM actor decisions are recorded as `llm_decision` events with the supplie
 
 Dependency propagation is recorded as `dependency_state_changed`; mission and security score evidence may cite those events through `source_event_ids`.
 
+Defender workflow actions emit delayed `action_completed` results and a paired
+`observation_delivered` event. Query and triage actions expose only role-valid
+artifacts such as source event ids, visible telemetry slices, case notes, and
+network/auth summaries. Disruptive actions such as host isolation, account
+reset, indicator blocks, and process termination must emit trace-backed service,
+dependency, mission, or defense-harm evidence when they affect operations.
+Audit-only assessment state may appear in trace `state_transition` records, but
+must not appear in defender observations or live `llm_decision.observation`
+payloads.
+
 Telemetry events include a `sensor` object when emitted through the Mission Desk
 runtime:
 

@@ -8,11 +8,12 @@ from typing import Any, Callable
 from badlands.agents.baselines import POLICIES
 from badlands.agents.llm import AttackerLLM, DefenderLLM, InvalidLLMDecision, LLMDecision
 from badlands.agents.user_simulator import CachedReplayUserSimulator
+from badlands.core.defender_actions import DEFENDER_ACTION_DURATIONS
 from badlands.core.env import MissionDeskEnv
 from badlands.core.observations import attacker_view
 
 ATTACK_DURATIONS = {"discover_local": 3, "scan_network": 5, "attempt_credential_access": 6, "establish_persistence": 4, "lateral_move": 5, "collect": 6}
-DEFENDER_DURATIONS = {"triage_alert": 3, "query_endpoint": 2, "query_identity": 2, "isolate_host": 2, "reset_account": 3, "rollback": 4}
+DEFENDER_DURATIONS = DEFENDER_ACTION_DURATIONS
 
 
 def _invalid_llm(env: MissionDeskEnv, role: str, exc: InvalidLLMDecision, observation: dict[str, Any]) -> None:

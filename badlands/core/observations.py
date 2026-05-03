@@ -36,7 +36,7 @@ def _visible_by_sensor(payload: dict, now: int | None) -> bool:
 
 def defender_view(events: list[dict], *, now: int | None = None) -> dict:
     visible_types = {"alert_emitted", "telemetry_emitted", "observation_delivered", "mission_task_event", "defense_harm_event"}
-    obs = {"alerts": [], "telemetry": [], "tickets": [], "action_results": [], "service_health": []}
+    obs = {"alerts": [], "telemetry": [], "tickets": [], "cases": [], "action_results": [], "service_health": []}
     for e in events:
         if now is not None and int(e["timestamp"]) > now:
             continue
@@ -66,6 +66,16 @@ def defender_view(events: list[dict], *, now: int | None = None) -> dict:
             obs["tickets"].append(p)
         elif e["type"] == "action_completed" and e.get("agent") == "defender":
             obs["action_results"].append(p)
+            if p.get("case_note"):
+                obs["cases"].append(
+                    {
+                        "event_id": e["event_id"],
+                        "case_id": p.get("case_id"),
+                        "action": p.get("action"),
+                        "note": p.get("case_note"),
+                        "source_event_ids": p.get("source_event_ids", []),
+                    }
+                )
     assert_no_forbidden(obs)
     return obs
 
