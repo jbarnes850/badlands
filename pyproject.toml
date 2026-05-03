@@ -9,6 +9,7 @@ description = "Active-network cyber self-play environment substrate"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Jarrod Barnes" }]
+license = "Apache-2.0"
 keywords = ["cyber", "self-play", "evaluation", "autonomous-cyber-defence", "llm"]
 dependencies = [
     "jsonschema>=4.0",

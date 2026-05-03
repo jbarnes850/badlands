@@ -57,6 +57,18 @@ Badlands includes:
 
 The default scenario is `badlands/scenarios/mission_desk.json`.
 
+## Live Operator View
+
+The campaign runner also emits a read-only dashboard so operators can watch
+self-play unfold while preserving the JSONL trace as the canonical evidence
+source.
+
+![Badlands live operator dashboard](assets/badlands-operator-dashboard-full.png)
+
+The dashboard surfaces the current agent objectives, latest actions, role token
+spend, latency, invalid decisions, repair pressure, replay status, score trend,
+mission/security effects, and evidence IDs for nonzero scores.
+
 ## What We Measure
 
 Badlands makes cyber self-play measurable by tying every score and headline state
