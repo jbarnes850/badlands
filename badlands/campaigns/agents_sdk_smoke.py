@@ -332,7 +332,8 @@ def _actors(
                 session_hard_stop_ratio=getattr(args, "context_hard_stop_ratio", 0.95),
                 session_compaction_keep_recent_items=getattr(args, "sdk_session_compaction_keep_recent_items", 24),
             )
-        actors[role] = actor_cls(cache_dir=cache_dir, seed=args.seed, client=client, model=client.model)
+        cache_enabled = getattr(args, "memory_mode", "campaign") != "sdk_raw_trajectory"
+        actors[role] = actor_cls(cache_dir=cache_dir, seed=args.seed, client=client, model=client.model, cache_enabled=cache_enabled)
     return actors
 
 

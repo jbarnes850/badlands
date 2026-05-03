@@ -369,9 +369,18 @@ class CachedLLMActor:
     role = "actor"
     actions: tuple[str, ...] = ()
 
-    def __init__(self, *, cache_dir: Path, seed: int = 1, client: OpenAICompatClient | None = None, model: str | None = None):
+    def __init__(
+        self,
+        *,
+        cache_dir: Path,
+        seed: int = 1,
+        client: OpenAICompatClient | None = None,
+        model: str | None = None,
+        cache_enabled: bool = True,
+    ):
         self.cache_dir = cache_dir
         self.seed = seed
+        self.cache_enabled = cache_enabled
         role_prefix = f"BADLANDS_{self.role.upper()}_LLM"
         role_base_url = os.getenv(f"{role_prefix}_BASE_URL")
         role_api_key = os.getenv(f"{role_prefix}_API_KEY")
@@ -397,9 +406,9 @@ class CachedLLMActor:
         prompt = self._prompt(observation)
         key = hashlib.sha256(json.dumps({"role": self.role, "model": self.model, "seed": self.seed, "prompt": prompt}, sort_keys=True).encode()).hexdigest()[:16]
         path = self.cache_dir / f"{self.role}_{key}.json"
-        cache_hit = path.exists()
+        cache_hit = self.cache_enabled and path.exists()
         started = time.perf_counter()
-        if path.exists():
+        if cache_hit:
             raw = json.loads(path.read_text())
             telemetry = {
                 "role": self.role,
@@ -480,7 +489,7 @@ class CachedLLMActor:
             exc.telemetry = telemetry
             self.last_decision_telemetry = telemetry
             raise
-        if not cache_hit:
+        if self.cache_enabled and not cache_hit:
             path.write_text(json.dumps(raw, sort_keys=True, indent=2))
         decision = LLMDecision.from_raw(raw)
         decision.inference_telemetry = telemetry

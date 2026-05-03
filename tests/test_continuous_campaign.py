@@ -75,6 +75,7 @@ def test_raw_trajectory_mode_records_sdk_session_strategy(tmp_path: Path, monkey
     assert report["sdk_session_strategy"]["history_retrieval"] == "all_items"
     assert report["role_isolation"]["separate_sdk_sessions"] is True
     assert report["episode_reports"][0]["memory_mode"] == "sdk_raw_trajectory"
+    assert not any((tmp_path / "raw-run" / "cache").glob("*.json"))
     state = json.loads((tmp_path / "raw-run" / "operator-state.json").read_text())
     assert state["role_isolation"]["sdk_raw_trajectory"] is True
 
