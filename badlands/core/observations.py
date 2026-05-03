@@ -27,8 +27,8 @@ def assert_no_forbidden(obj: object) -> None:
 
 
 def defender_view(events: list[dict]) -> dict:
-    visible_types = {"alert_emitted", "telemetry_emitted", "observation_delivered", "mission_task_event", "defense_harm_event"}
-    obs = {"alerts": [], "telemetry": [], "tickets": [], "action_results": []}
+    visible_types = {"alert_emitted", "telemetry_emitted", "observation_delivered", "mission_task_event", "defense_harm_event", "dependency_state_changed"}
+    obs = {"alerts": [], "telemetry": [], "tickets": [], "action_results": [], "service_health": []}
     for e in events:
         if e["type"] not in visible_types and e["agent"] != "defender":
             continue
@@ -52,6 +52,18 @@ def defender_view(events: list[dict]) -> dict:
                 )
         elif e["type"] == "mission_task_event" and p.get("ticket"):
             obs["tickets"].append(p)
+        elif e["type"] == "dependency_state_changed":
+            obs["service_health"].append(
+                {
+                    "event_id": e["event_id"],
+                    "node_id": p.get("node_id"),
+                    "kind": p.get("kind"),
+                    "ref": p.get("ref"),
+                    "status": p.get("status"),
+                    "reason": p.get("reason"),
+                    "source_event_ids": p.get("source_event_ids", []),
+                }
+            )
         elif e["type"] == "action_completed" and e.get("agent") == "defender":
             obs["action_results"].append(p)
     assert_no_forbidden(obs)

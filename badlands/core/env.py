@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 import badlands.network.mission_app as mission_app
 from badlands.agents.llm import InvalidLLMDecision, LLMDecision
+from badlands.core.dependencies import AVAILABLE, DEGRADED, UNAVAILABLE, DependencyGraph, build_dependency_graph, public_dependency_inventory
 from badlands.core.observations import defender_view
 from badlands.core.scenario import Scenario
 from badlands.core.state import WorldState, initial_state
@@ -61,12 +62,15 @@ class MissionDeskEnv:
         self.ingested_service_events: set[str] = set()
         self.idp_sessions: dict[str, str] = {}
         self.user_simulator = user_simulator
+        self.dependency_graph: DependencyGraph = build_dependency_graph(self.scenario)
+        self.dependency_states = self.dependency_graph.effective_states()
         self._ensure_identity_service()
         self.trace.emit(
             "state_transition",
             0,
             {"kind": "environment_started", "seed": seed, "scenario_id": self.scenario.scenario_id, "hosts": list(self.state.hosts)},
         )
+        self._emit_dependency_snapshot("environment_started")
         for host_id in self.scenario.attacker.get("initial_compromised_hosts", []):
             self.trace.emit("security_impact_event", 0, {"kind": "compromise_active", "host_ref": host_id})
         if not no_green:
@@ -92,7 +96,7 @@ class MissionDeskEnv:
             self.service_url = f"http://127.0.0.1:{self._local_service.server_port}"
         self._service_post(
             "/admin/reset_state",
-            {"users": sorted(self.scenario.user_ids), "files": self._scenario_files()},
+            {"users": sorted(self.scenario.user_ids), "files": self._scenario_files(), "service_states": self.dependency_graph.service_states()},
             user="system",
         )
         self.ingest_service_logs()
@@ -102,6 +106,102 @@ class MissionDeskEnv:
         for host in self.scenario.hosts:
             files.update({str(name): str(content) for name, content in host.get("files", {}).items()})
         return files
+
+    def _emit_dependency_snapshot(self, reason: str) -> None:
+        for node_id, status in sorted(self.dependency_states.items()):
+            node = self.dependency_graph.nodes[node_id]
+            self.trace.emit(
+                "dependency_state_changed",
+                self.now,
+                {
+                    "node_id": node_id,
+                    "kind": node.kind,
+                    "ref": node.ref,
+                    "previous_status": None,
+                    "status": status,
+                    "reason": reason,
+                    "source_event_ids": [],
+                },
+            )
+
+    def _set_dependency_state(
+        self,
+        node_id: str,
+        status: str,
+        reason: str,
+        *,
+        parent: str | None = None,
+        agent: str | None = None,
+    ) -> list[str]:
+        previous = self.dependency_states
+        self.dependency_graph.set_state(node_id, status)
+        current = self.dependency_graph.effective_states()
+        changed: list[str] = []
+        parent_ids = [parent] if parent else []
+        for changed_node_id in sorted(current):
+            if previous.get(changed_node_id) == current[changed_node_id]:
+                continue
+            node = self.dependency_graph.nodes[changed_node_id]
+            payload = {
+                "node_id": changed_node_id,
+                "kind": node.kind,
+                "ref": node.ref,
+                "previous_status": previous.get(changed_node_id, AVAILABLE),
+                "status": current[changed_node_id],
+                "reason": reason,
+                "source_node_id": node_id,
+                "source_event_ids": parent_ids,
+            }
+            eid = self.trace.emit("dependency_state_changed", self.now, payload, agent=agent, parents=parent_ids)
+            changed.append(eid)
+            if node.kind == "service":
+                self._sync_service_state(node.ref, current[changed_node_id], reason, eid)
+                if current[changed_node_id] in {DEGRADED, UNAVAILABLE}:
+                    minutes = 5 if current[changed_node_id] == DEGRADED else 10
+                    self.trace.emit(
+                        "defense_harm_event",
+                        self.now,
+                        {
+                            "field": "service_downtime_minutes",
+                            "minutes": minutes,
+                            "service": node.ref,
+                            "reason": reason,
+                            "dependency_status": current[changed_node_id],
+                            "source_event_ids": [eid],
+                        },
+                        agent=agent,
+                        parents=[eid],
+                    )
+                    if agent == "attacker":
+                        self.trace.emit(
+                            "security_impact_event",
+                            self.now,
+                            {
+                                "kind": "service_disruption",
+                                "service": node.ref,
+                                "status": current[changed_node_id],
+                                "reason": reason,
+                                "source_event_ids": [eid],
+                            },
+                            agent=agent,
+                            parents=[eid],
+                        )
+        self.dependency_states = current
+        return changed
+
+    def _sync_service_state(self, service: str, status: str, reason: str, source_event_id: str) -> None:
+        self._service_post_json(
+            "/admin/service_state",
+            {"service": service, "status": status, "source": source_event_id, "host": "dependency-controller", "reason": reason},
+            user="system",
+        )
+        self.ingest_service_logs()
+
+    def _host_node(self, host_id: str) -> str:
+        return f"host:{host_id}"
+
+    def _service_node(self, service_id: str) -> str:
+        return f"service:{service_id}"
 
     def schedule(self, delay: int, fn: Callable) -> None:
         self.seq += 1
@@ -136,6 +236,7 @@ class MissionDeskEnv:
             {"host_id": h.host_id, "role": h.role, "owner": h.owner, "criticality": h.criticality, "isolated": h.isolated}
             for h in self.state.hosts.values()
         ]
+        obs["service_inventory"] = public_dependency_inventory(self.dependency_graph)
         if self.magic_observations:
             obs["magic"] = {"suspect_host": self.state.attacker_host}
         return obs
@@ -476,6 +577,13 @@ class MissionDeskEnv:
             if self.state.attacker_host == self.scenario.attacker["lateral_target_host"]:
                 self.state.collected_files.add(target)
                 self.trace.emit("security_impact_event", self.now, {"kind": "collection", "file_ref": target}, parents=[parent])
+                self._set_dependency_state(
+                    self._service_node("file_share"),
+                    DEGRADED,
+                    "attacker_collection_degraded_file_share",
+                    parent=parent,
+                    agent="attacker",
+                )
             self.telemetry("file", {"file.path": f"/share/{target}", "event.action": "read"}, parents=[parent])
         self.trace.emit("action_completed", self.now, {"action": action, "success": "stderr" not in out, "attacker_output": out, "duration": 1}, agent="attacker", parents=[parent])
 
@@ -523,9 +631,14 @@ class MissionDeskEnv:
             payload["outcome"] = "host network access policy updated"
             audit_true_positive = self.state.hosts[host].compromised or self.state.hosts[host].persistence
             self.trace.emit("state_transition", self.now, {"kind": "defender_action_assessment", "action": action, "target": host, "audit_true_positive": audit_true_positive}, parents=[parent])
-            if self.service_url and host == self.scenario.service_host(self.scenario.mission_service_id):
-                self._service_post("/admin/isolate_app", {}, user="defender")
-                self.ingest_service_logs()
+            dependency_events = self._set_dependency_state(
+                self._host_node(host),
+                UNAVAILABLE,
+                "defender_host_isolation",
+                parent=parent,
+                agent="defender",
+            )
+            payload["source_event_ids"] = dependency_events
             if not audit_true_positive or self.state.hosts[host].criticality >= 5:
                 self.trace.emit("defense_harm_event", self.now, {"field": "host_isolation_minutes", "minutes": 10, "host_id": host, "reason": "isolation_blast_radius"}, agent="defender", parents=[parent])
         elif action == "reset_account":
@@ -543,6 +656,21 @@ class MissionDeskEnv:
             target = params.get("target", self.scenario.attacker["initial_host"])
             if target in self.state.hosts:
                 self.state.hosts[target].isolated = False
+                payload["source_event_ids"] = self._set_dependency_state(
+                    self._host_node(target),
+                    AVAILABLE,
+                    "defender_rollback",
+                    parent=parent,
+                    agent="defender",
+                )
+            if target in self.scenario.service_ids:
+                payload["source_event_ids"] = self._set_dependency_state(
+                    self._service_node(target),
+                    AVAILABLE,
+                    "defender_rollback",
+                    parent=parent,
+                    agent="defender",
+                )
             if target in self.state.users:
                 self._service_post_json("/idp/unlock", {"user": target, "host": "defender"}, user="defender")
                 self.ingest_service_logs()

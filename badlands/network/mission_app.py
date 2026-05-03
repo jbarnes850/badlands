@@ -53,6 +53,13 @@ def _initial_state(user_ids: list[str] | None = None, files: dict[str, str] | No
         "mission_tasks": [],
         "tickets": [],
         "ticket_counter": 0,
+        "service_states": {
+            "idp": "available",
+            "mission_app": "available",
+            "file_share": "available",
+            "ticket": "available",
+            "telemetry": "available",
+        },
     }
 
 
@@ -95,6 +102,17 @@ class Handler(BaseHTTPRequestHandler):
         if size <= 0:
             return {}
         return json.loads(self.rfile.read(size).decode() or "{}")
+
+    def _service_state(self, state: dict, service: str) -> str:
+        return state.get("service_states", {}).get(service, "available")
+
+    def _service_available(self, state: dict, service: str) -> tuple[bool, str]:
+        service_state = self._service_state(state, service)
+        if service_state == "unavailable":
+            return False, "dependency_unavailable"
+        if service_state == "degraded":
+            return False, "dependency_degraded"
+        return True, "available"
 
     def _idp_log(self, *, user: str, host: str, service: str, action: str, outcome: str, reason: str, session_id: str | None = None) -> None:
         event = {
@@ -139,9 +157,26 @@ class Handler(BaseHTTPRequestHandler):
         )
         if self.path == "/health":
             state = _state()
-            self.send_response(200 if state.get("app_available", True) else 503)
+            service = "mission_app"
+            status = self._service_state(state, service)
+            available = state.get("app_available", True) and status == "available"
+            self._service_log(
+                action="health_check",
+                user=user,
+                host=self.headers.get("X-Host", "unknown"),
+                service=service,
+                outcome="success" if available else "failure",
+                reason=status,
+            )
+            self.send_response(200 if available else 503)
             self.end_headers()
-            self.wfile.write(b"ok" if state.get("app_available", True) else b"isolated")
+            self.wfile.write(b"ok" if available else status.encode())
+            return
+        if self.path == "/service/status":
+            state = _state()
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps({"service_states": state.get("service_states", {})}).encode())
             return
         if self.path.startswith("/logs"):
             run_id = self.path.split("run_id=")[-1] if "run_id=" in self.path else None
@@ -158,6 +193,10 @@ class Handler(BaseHTTPRequestHandler):
             session_id = self.headers.get("X-Session", "")
             host = self.headers.get("X-Host", "unknown")
             ok, reason = self._session_ok(user=user, host=host, service="file_share", session_id=session_id)
+            state = _state()
+            service_ok, service_reason = self._service_available(state, "file_share")
+            if ok and not service_ok:
+                ok, reason = False, service_reason
             if not ok:
                 self._service_log(
                     action="file_read",
@@ -173,7 +212,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"ok": False, "reason": reason}).encode())
                 return
             name = self.path.split("/")[-1]
-            state = _state()
             content = state.get("files", {}).get(name)
             if content is None:
                 self._service_log(
@@ -221,7 +259,9 @@ class Handler(BaseHTTPRequestHandler):
             body = self._json_body()
             ROOT.mkdir(exist_ok=True)
             FILES.mkdir(exist_ok=True)
-            _save_state(_initial_state(body.get("users"), body.get("files")))
+            state = _initial_state(body.get("users"), body.get("files"))
+            state["service_states"].update(body.get("service_states", {}))
+            _save_state(state)
             LOG.write_text("")
             if TICKETS.exists():
                 TICKETS.write_text("")
@@ -245,7 +285,12 @@ class Handler(BaseHTTPRequestHandler):
                 outcome = "failure"
                 status = 503
             else:
-                ok, reason = self._session_ok(user=user, host=host, service="mission_app", session_id=session_id)
+                ok, reason = self._service_available(state, "mission_app")
+                if ok:
+                    ok, reason = self._session_ok(user=user, host=host, service="mission_app", session_id=session_id)
+                file_ok, file_reason = self._service_available(state, "file_share")
+                if ok and not file_ok:
+                    ok, reason = False, file_reason
                 if ok and file_name not in state.get("files", {}):
                     ok, reason = False, "file_not_found"
                 outcome = "success" if ok else "failure"
@@ -273,12 +318,46 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"ok": outcome == "success", **record}).encode())
             return
+        if self.path == "/admin/service_state":
+            body = self._json_body()
+            state = _state()
+            service = str(body.get("service", ""))
+            status = str(body.get("status", "available"))
+            if status not in {"available", "degraded", "unavailable"}:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(b'{"ok":false,"reason":"unknown_status"}')
+                return
+            state.setdefault("service_states", {})[service] = status
+            if service == "mission_app":
+                state["app_available"] = status == "available"
+            _save_state(state)
+            self._service_log(
+                action="service_state_changed",
+                user=user,
+                host=body.get("host", "dependency-controller"),
+                service=service,
+                outcome="success",
+                reason=status,
+                **{"badlands.dependency.status": status, "badlands.dependency.source": body.get("source")},
+            )
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "service": service, "status": status}).encode())
+            return
         if self.path == "/idp/login":
             body = self._json_body()
             state = _state()
             login_user = body.get("user", "")
             host = body.get("host", "unknown")
             password = body.get("password", "")
+            service_ok, service_reason = self._service_available(state, "idp")
+            if not service_ok:
+                self._idp_log(user=login_user, host=host, service="idp", action="user_login", outcome="failure", reason=service_reason)
+                self.send_response(503)
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "reason": service_reason}).encode())
+                return
             record = state["users"].get(login_user)
             if not record:
                 self._idp_log(user=login_user, host=host, service="idp", action="user_login", outcome="failure", reason="unknown_user")
@@ -313,6 +392,13 @@ class Handler(BaseHTTPRequestHandler):
             login_user = body.get("user", "")
             host = body.get("host", "unknown")
             session_id = body.get("session_id", "")
+            service_ok, service_reason = self._service_available(state, "idp")
+            if not service_ok:
+                self._idp_log(user=login_user, host=host, service=body.get("service", "mission_app"), action="session_validate", outcome="failure", reason=service_reason, session_id=session_id or None)
+                self.send_response(503)
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "reason": service_reason}).encode())
+                return
             record = state["users"].get(login_user, {})
             ok = not record.get("locked") and session_id in record.get("sessions", [])
             reason = "valid_session" if ok else ("account_locked" if record.get("locked") else "invalid_session")
@@ -377,6 +463,13 @@ class Handler(BaseHTTPRequestHandler):
             state = _state()
             target = body.get("user", "")
             host = body.get("host", "attacker")
+            service_ok, service_reason = self._service_available(state, "idp")
+            if not service_ok:
+                self._idp_log(user=target, host=host, service=body.get("service", "files-1"), action="credential_use", outcome="failure", reason=service_reason)
+                self.send_response(503)
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "reason": service_reason}).encode())
+                return
             record = state["users"].get(target)
             ok = bool(record) and not record.get("locked") and body.get("password") == record.get("password")
             reason = "credential_valid" if ok else ("account_locked" if record and record.get("locked") else "credential_invalid")
@@ -388,6 +481,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/admin/isolate_app":
             state = _state()
             state["app_available"] = False
+            state.setdefault("service_states", {})["mission_app"] = "unavailable"
             _save_state(state)
             self._log({"event.action": "service_isolated", "service.name": "mission_app", "user.name": user})
             self.send_response(200)
@@ -397,6 +491,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/admin/restore_app":
             state = _state()
             state["app_available"] = True
+            state.setdefault("service_states", {})["mission_app"] = "available"
             _save_state(state)
             self._log({"event.action": "service_restored", "service.name": "mission_app", "user.name": user})
             self.send_response(200)
@@ -407,6 +502,21 @@ class Handler(BaseHTTPRequestHandler):
             body = self._json_body()
             ROOT.mkdir(exist_ok=True)
             state = _state()
+            service_ok, service_reason = self._service_available(state, "ticket")
+            if not service_ok:
+                self._service_log(
+                    action="ticket_created",
+                    user=user,
+                    host=body.get("host", "unknown"),
+                    service="ticket",
+                    outcome="failure",
+                    reason=service_reason,
+                    **{"badlands.task.id": body.get("task_id")},
+                )
+                self.send_response(503)
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "reason": service_reason}).encode())
+                return
             state["ticket_counter"] = int(state.get("ticket_counter", 0)) + 1
             ticket = {
                 "ticket_id": f"ticket-{state['ticket_counter']:06d}",
