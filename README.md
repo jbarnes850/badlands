@@ -69,6 +69,13 @@ python3 -m badlands.scoring.replay runs/mission-desk.jsonl
 
 ## Initial artifacts
 
+- `docs/autonomy-contract.md` — canonical mission charter, invariants, stop/go gates, and planner/executor/reviewer protocols for autonomous issue execution.
+- `docs/execution-roadmap.md` — ordered remaining issue lane with per-issue contracts, validation expectations, deferred scope, and review questions.
+- `docs/overnight-runbook.md` — one-issue-at-a-time autonomous execution loop with Linear/session-history intake, live validation, run ledger, subagent review, commit, and continuation gates.
+- `docs/validation-matrix.md` — stable validation requirements by change type.
+- `docs/capability-curve-contract.md` — co-evolution definition, run tiers, comparison axes, required metadata, and served-context rules for long-horizon measurement.
+- `docs/run-ledger.md` and `docs/run-ledger.schema.json` — machine-readable run ledger contract for live, ablation, and long-horizon evidence.
+- `docs/decisions.md` — architectural decision log for scope and layering decisions.
 - `docs/architecture.md` — four-component architecture: attacker, defender, green/user simulator, and active network environment.
 - `docs/environment-contract.md` — precise hidden state, observation surfaces, action surfaces, event model, timing model, and trace/scoring requirements.
 - `docs/minimum-valid-environment.md` — narrative environment contract for the smallest plausible mission world.

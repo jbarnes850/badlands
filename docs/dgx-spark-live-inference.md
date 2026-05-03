@@ -13,6 +13,14 @@ Live Spark inference is an opt-in verification path for LLM-backed actors. Norma
 
 All three endpoints have responded to `/v1/models` and completed JSON chat requests.
 
+The 32768-token context shown above is a smoke/liveness serving profile. It is
+not sufficient evidence for DS-29 campaign continuity or long-horizon
+capability-curve claims. Before DS-29 or later 1-hour/3-hour/6-hour runs are
+treated as representative, increase and record the effective served context by
+role. Prefer the largest stable vLLM context the endpoint can serve without KV
+preemption, saturation, or unacceptable latency. Record both advertised model
+context and effective served context in the live report and run ledger.
+
 ## Primary Spark access
 
 - SSH alias: `spark`
@@ -176,11 +184,17 @@ The Agents SDK campaign harness should consume these DS-24 fields:
 - `prompt_token_estimate`, `completion_tokens`, `wall_latency_s`
 - `attempt_count`, `repair_count`, `validation_error`, `invalid_decision_reason`
 - `badlands_event_id`, `trace_path`, optional `sdk_run_id`, optional `sdk_session_id`
+- advertised and effective served context by role when available
 
 Per the OpenAI Agents SDK docs, SDK use is appropriate when the application
 owns orchestration, tool execution, approvals, and state. DS-29 should keep
 separate role sessions for attacker, defender, and green, choose explicit
 models per role, and treat SDK run/session IDs as observability metadata rather
 than canonical environment truth.
+
+For the current Badlands definition, co-evolution means within-run adaptation
+through role memory and across-episode adaptation through campaign state. It
+does not include prompt/scaffold self-modification, arbitrary tool invention,
+or agent-authored scenario changes.
 
 Safety: LLM actors propose structured actions only. The environment validates actions and restricts attacker actions to the local Badlands enclave. No arbitrary shell execution or external targeting is permitted.
