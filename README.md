@@ -80,6 +80,7 @@ python3 -m badlands.scoring.replay runs/mission-desk.jsonl
 - `docs/environment-contract.md` — precise hidden state, observation surfaces, action surfaces, event model, timing model, and trace/scoring requirements.
 - `docs/minimum-valid-environment.md` — narrative environment contract for the smallest plausible mission world.
 - `docs/substrate-review.md` — citation-grade substrate table with realism anchors, gaps, and intended Badlands use.
+- `docs/realism-provenance.md` — reviewer-facing provenance crosswalk tying implemented mechanisms to source anchors, local artifacts, and validation plans.
 - `docs/validity-experiments.md` — ablation matrix with expected directional outcomes and pass/fail criteria.
 - `docs/validation-checklist.md` — reviewer checklist derived from the virtualisation/modelling-gap framework.
 - `docs/implementation.md` — implemented vertical-slice architecture and realism-anchor mapping.

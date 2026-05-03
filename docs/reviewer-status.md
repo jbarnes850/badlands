@@ -67,6 +67,8 @@
 - DS-29 adds a two-step Agents SDK campaign harness with one role-isolated
   SDK session per actor, trace-visible campaign-memory visibility events,
   hidden/cross-role memory rejection tests, and JSONL-only replay.
+- DS-25 adds `docs/realism-provenance.md`, a compact source/local-artifact/
+  validation-plan crosswalk for major environment mechanisms.
 
 ## Intentionally incomplete
 
@@ -87,3 +89,6 @@
 - DS-29 is a smoke campaign harness, not representative long-horizon evidence.
   The current 32768-token served context remains liveness context unless a
   larger stable context is measured and recorded by role.
+- DS-25 identifies calibration assumptions but does not close them. DS-26 owns
+  selected sim-to-emulation calibration hooks for action durations, artifacts,
+  and preconditions.

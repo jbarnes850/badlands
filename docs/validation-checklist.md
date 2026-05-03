@@ -62,3 +62,14 @@ Derived from the virtualisation/modelling-gap taxonomy in arXiv:2604.08805v1 and
 - [ ] Delays and concurrency do not change outcomes.
 - [ ] Scores cannot be recomputed from recorded traces.
 - [ ] Claims of realism lack a cited dataset, platform, workflow, or higher-fidelity validation plan.
+
+## Provenance gate
+
+- [x] Reviewer-facing realism provenance crosswalk exists:
+  [`docs/realism-provenance.md`](realism-provenance.md).
+- [x] The crosswalk covers scenario, identity, mission services, green
+  behavior, attacker actions, defender actions, observations, timing, scoring,
+  ablations, live inference, campaign memory, and sim-to-emulation calibration
+  hooks.
+- [ ] Before external claims, every implemented-realism statement must cite the
+  crosswalk row, local artifact, and source anchor it depends on.
