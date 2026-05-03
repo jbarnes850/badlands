@@ -12,6 +12,7 @@ FIELDS = [
     "user_lockout_minutes", "host_isolation_minutes", "benign_process_kills",
     "attacker_dwell_minutes", "persistence_minutes", "credentials_compromised_count",
     "lateral_movement_count", "sensitive_files_accessed_count", "exfiltration_units",
+    "service_disruption_count",
     "true_positive_actions", "false_positive_actions", "analyst_minutes", "action_count",
 ]
 
@@ -19,6 +20,7 @@ FIELDS = [
 def _add(score: dict[str, int], evidence: dict[str, list[str]], field: str, event: dict, amount: int = 1) -> None:
     score[field] += amount
     evidence[field].append(event["event_id"])
+    evidence[field].extend(event["payload"].get("source_event_ids", []))
 
 
 def derive_scores_with_evidence(events: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, list[str]]]:
@@ -62,6 +64,8 @@ def derive_scores_with_evidence(events: list[dict[str, Any]]) -> tuple[dict[str,
                 impacted_hosts.add(payload.get("dst", ""))
             elif kind == "collection":
                 _add(score, evidence, "sensitive_files_accessed_count", event)
+            elif kind == "service_disruption":
+                _add(score, evidence, "service_disruption_count", event)
         elif event_type == "action_completed" and event.get("agent") == "defender":
             _add(score, evidence, "action_count", event)
             _add(score, evidence, "analyst_minutes", event, int(payload.get("duration", 0)))
@@ -85,8 +89,20 @@ def derive_scores_with_evidence(events: list[dict[str, Any]]) -> tuple[dict[str,
     if first_persistence is not None:
         score["persistence_minutes"] = max(0, (persistence_end or end) - first_persistence)
     score["credentials_compromised_count"] = len([cred for cred in creds if cred])
-    score["overall_mission_score"] = score["mission_tasks_completed"] * 10 - score["mission_tasks_failed"] * 10 - score["user_lockout_minutes"] - score["host_isolation_minutes"]
-    score["overall_security_score"] = 100 - score["attacker_dwell_minutes"] - 10 * score["lateral_movement_count"] - 20 * score["sensitive_files_accessed_count"]
+    score["overall_mission_score"] = (
+        score["mission_tasks_completed"] * 10
+        - score["mission_tasks_failed"] * 10
+        - score["user_lockout_minutes"]
+        - score["host_isolation_minutes"]
+        - score["service_downtime_minutes"]
+    )
+    score["overall_security_score"] = (
+        100
+        - score["attacker_dwell_minutes"]
+        - 10 * score["lateral_movement_count"]
+        - 20 * score["sensitive_files_accessed_count"]
+        - 10 * score["service_disruption_count"]
+    )
     score["overall_defense_quality_score"] = score["true_positive_actions"] * 10 - score["false_positive_actions"] * 10 - score["analyst_minutes"]
     for aggregate in ["overall_mission_score", "overall_security_score", "overall_defense_quality_score"]:
         evidence[aggregate] = sorted({eid for ids in evidence.values() for eid in ids})
