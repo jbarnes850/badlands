@@ -49,7 +49,7 @@ The arXiv 2604.08805 environment taxonomy frames this slice as reducing both the
 
 ## Deferred Work
 
-- DS-18: service dependencies are represented and mission tasks cite dependencies, but dependency graph outage propagation is still limited.
+- DS-18: first-class dependency propagation is implemented for the compact Mission Desk workflow; richer degraded-mode latency/retry semantics remain deferred.
 - DS-20: benign noise and sensor limits are not yet calibrated.
 - DS-21: defender workflow remains compact; richer cases/escalation are deferred.
 - DS-23: validity runner and systematic ablation reports are deferred.

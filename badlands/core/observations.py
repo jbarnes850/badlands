@@ -27,7 +27,7 @@ def assert_no_forbidden(obj: object) -> None:
 
 
 def defender_view(events: list[dict]) -> dict:
-    visible_types = {"alert_emitted", "telemetry_emitted", "observation_delivered", "mission_task_event", "defense_harm_event", "dependency_state_changed"}
+    visible_types = {"alert_emitted", "telemetry_emitted", "observation_delivered", "mission_task_event", "defense_harm_event"}
     obs = {"alerts": [], "telemetry": [], "tickets": [], "action_results": [], "service_health": []}
     for e in events:
         if e["type"] not in visible_types and e["agent"] != "defender":
@@ -52,18 +52,6 @@ def defender_view(events: list[dict]) -> dict:
                 )
         elif e["type"] == "mission_task_event" and p.get("ticket"):
             obs["tickets"].append(p)
-        elif e["type"] == "dependency_state_changed":
-            obs["service_health"].append(
-                {
-                    "event_id": e["event_id"],
-                    "node_id": p.get("node_id"),
-                    "kind": p.get("kind"),
-                    "ref": p.get("ref"),
-                    "status": p.get("status"),
-                    "reason": p.get("reason"),
-                    "source_event_ids": p.get("source_event_ids", []),
-                }
-            )
         elif e["type"] == "action_completed" and e.get("agent") == "defender":
             obs["action_results"].append(p)
     assert_no_forbidden(obs)
@@ -83,8 +71,24 @@ def green_view(events: list[dict]) -> dict:
     obs = {"mission": [], "tickets": []}
     for e in events:
         if e["type"] == "mission_task_event":
-            obs["mission"].append({**e["payload"], "event_id": e["event_id"]})
+            obs["mission"].append(
+                {
+                    "event_id": e["event_id"],
+                    "task_id": e["payload"].get("task_id"),
+                    "status": e["payload"].get("status"),
+                    "reason": e["payload"].get("reason"),
+                    "ticket": e["payload"].get("ticket", False),
+                }
+            )
         elif e["type"] == "defense_harm_event":
-            obs["tickets"].append({**e["payload"], "event_id": e["event_id"]})
+            obs["tickets"].append(
+                {
+                    "event_id": e["event_id"],
+                    "reason": "mission_service_disruption"
+                    if e["payload"].get("field") == "service_downtime_minutes"
+                    else e["payload"].get("reason"),
+                    "impact": e["payload"].get("field"),
+                }
+            )
     assert_no_forbidden(obs)
     return obs

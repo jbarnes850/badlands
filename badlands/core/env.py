@@ -324,7 +324,14 @@ class MissionDeskEnv:
         )
         evidence.extend(mission_events)
         if file_status >= 400 or status >= 400 or not body.get("ok"):
-            self._fail_green_task(i, user, host, body.get("reason", "mission_app_auth_failed"), evidence)
+            self._fail_green_task(
+                i,
+                user,
+                host,
+                body.get("reason", "mission_app_auth_failed"),
+                evidence,
+                mission_recorded=True,
+            )
             return
         self.state.mission_completed += 1
         self.trace.emit(
@@ -342,16 +349,28 @@ class MissionDeskEnv:
             parents=evidence,
         )
 
-    def _fail_green_task(self, i: int, user: str, host: str, reason: str, evidence: list[str]) -> None:
+    def _fail_green_task(
+        self,
+        i: int,
+        user: str,
+        host: str,
+        reason: str,
+        evidence: list[str],
+        *,
+        mission_recorded: bool = False,
+    ) -> None:
         task_id = f"task-{i}"
-        status, _, mission_events = self._mission_task(
-            task_id=task_id,
-            user=user,
-            host=host,
-            session_id=self.idp_sessions.get(user, ""),
-            mission_file=self.scenario.attacker["collection_target"],
-            precondition_failure=reason,
-        )
+        status = 409
+        mission_events: list[str] = []
+        if not mission_recorded:
+            status, _, mission_events = self._mission_task(
+                task_id=task_id,
+                user=user,
+                host=host,
+                session_id=self.idp_sessions.get(user, ""),
+                mission_file=self.scenario.attacker["collection_target"],
+                precondition_failure=reason,
+            )
         evidence = [*evidence, *mission_events]
         ticket = self._create_ticket(user=user, host=host, task_id=task_id, reason=reason)
         evidence.extend(ticket["events"])

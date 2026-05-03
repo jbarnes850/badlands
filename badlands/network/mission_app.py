@@ -280,10 +280,6 @@ class Handler(BaseHTTPRequestHandler):
                 reason = str(body["precondition_failure"])
                 outcome = "failure"
                 status = 409
-            elif not state.get("app_available", True):
-                reason = "service_isolated"
-                outcome = "failure"
-                status = 503
             else:
                 ok, reason = self._service_available(state, "mission_app")
                 if ok:
@@ -291,6 +287,8 @@ class Handler(BaseHTTPRequestHandler):
                 file_ok, file_reason = self._service_available(state, "file_share")
                 if ok and not file_ok:
                     ok, reason = False, file_reason
+                if ok and not state.get("app_available", True):
+                    ok, reason = False, "service_isolated"
                 if ok and file_name not in state.get("files", {}):
                     ok, reason = False, "file_not_found"
                 outcome = "success" if ok else "failure"

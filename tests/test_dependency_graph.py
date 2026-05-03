@@ -8,7 +8,7 @@ from badlands.cli import run_episode
 from badlands.core.datasets import AuthAffinity
 from badlands.core.dependencies import AVAILABLE, DEGRADED, UNAVAILABLE
 from badlands.core.env import MissionDeskEnv
-from badlands.core.observations import attacker_view, green_view
+from badlands.core.observations import attacker_view, defender_view, green_view
 from badlands.core.state import User
 from badlands.core.trace import load_trace
 
@@ -119,9 +119,43 @@ def test_dependency_truth_does_not_leak_to_attacker_or_green(tmp_path: Path):
     events = load_trace(tmp_path / "observations.jsonl")
 
     defender = env.defender_observation()
-    assert defender["service_health"]
     assert defender["service_inventory"]
 
     assert "depends_on" not in str(attacker_view(events))
     assert "service:file_share" not in str(attacker_view(events))
     assert "depends_on" not in str(green_view(events))
+    assert "dependency_status" not in str(green_view(events))
+    assert "file_share" not in str(green_view(events))
+    assert "mission_app" not in str(green_view(events))
+
+
+def test_defender_observation_uses_artifacts_not_raw_dependency_events(tmp_path: Path):
+    env = MissionDeskEnv(tmp_path / "defender-artifacts.jsonl", seed=1, no_green=True)
+    _single_alice(env)
+    env._set_dependency_state("service:file_share", DEGRADED, "test_file_share_degraded")
+    env.green_task(0)
+    env.run(5)
+
+    obs = defender_view(load_trace(tmp_path / "defender-artifacts.jsonl"))
+    assert obs["telemetry"]
+    assert not obs["service_health"]
+    assert "service:file_share" not in str(obs)
+    assert "dependency_state_changed" not in str(obs)
+
+
+def test_degraded_dependency_reason_is_not_mislabelled_service_isolated(tmp_path: Path):
+    env = MissionDeskEnv(tmp_path / "reason.jsonl", seed=1, no_green=True)
+    _single_alice(env)
+    env._set_dependency_state("service:file_share", DEGRADED, "test_file_share_degraded")
+    env.green_task(0)
+    env.run(5)
+
+    service_events = [
+        e["payload"]["ecs"]
+        for e in load_trace(tmp_path / "reason.jsonl")
+        if e["type"] == "telemetry_emitted"
+        and e["payload"].get("category") == "service"
+        and e["payload"]["ecs"].get("event.action") == "mission_task"
+    ]
+    assert [event["event.reason"] for event in service_events].count("dependency_degraded") == 1
+    assert "service_isolated" not in [event["event.reason"] for event in service_events]
