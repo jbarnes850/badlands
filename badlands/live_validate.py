@@ -104,11 +104,11 @@ def preflight(endpoints: dict[str, RoleEndpoint], *, chat_timeout: int) -> list[
         chat_body = {
             "model": cfg.model,
             "messages": [
-                {"role": "system", "content": "Return JSON only."},
+                {"role": "system", "content": "Return JSON only. Do not include reasoning or hidden thinking."},
                 {"role": "user", "content": 'Return {"ok": true, "role": "' + cfg.role + '"}.'},
             ],
             "temperature": 0,
-            "max_tokens": 64,
+            "max_tokens": 256,
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
@@ -151,7 +151,17 @@ def preflight(endpoints: dict[str, RoleEndpoint], *, chat_timeout: int) -> list[
         if chat_status != 200:
             raise EndpointFailure(cfg.role, cfg.base_url, "bounded JSON chat", f"HTTP {chat_status}")
         message = chat.get("choices", [{}])[0].get("message", {})
-        content = message.get("content") or message.get("reasoning") or "{}"
+        content = message.get("content")
+        reasoning = message.get("reasoning")
+        if reasoning not in (None, ""):
+            raise EndpointFailure(
+                cfg.role,
+                cfg.base_url,
+                "reasoning disabled canary",
+                "chat response included message.reasoning despite enable_thinking=false",
+            )
+        if not isinstance(content, str) or not content.strip():
+            raise EndpointFailure(cfg.role, cfg.base_url, "JSON compatibility", "chat response did not include content")
         try:
             json.loads(content)
         except json.JSONDecodeError as exc:

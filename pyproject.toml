@@ -6,7 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "badlands"
 version = "0.1.0"
 description = "Active-network cyber self-play environment substrate"
+readme = "README.md"
 requires-python = ">=3.11"
+authors = [{ name = "Jarrod Barnes" }]
+keywords = ["cyber", "self-play", "evaluation", "autonomous-cyber-defence", "llm"]
 dependencies = [
     "jsonschema>=4.0",
     "openai-agents>=0.15.1",
@@ -21,6 +24,7 @@ badlands-replay = "badlands.scoring.replay:main"
 badlands-live-validate = "badlands.live_validate:main"
 badlands-validity = "badlands.validity_experiments:main"
 badlands-agents-sdk-campaign = "badlands.campaigns.agents_sdk_smoke:main"
+badlands-campaign-run = "badlands.campaigns.continuous:main"
 
 [tool.setuptools.packages.find]
 include = ["badlands*"]

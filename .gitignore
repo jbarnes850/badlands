@@ -5,4 +5,16 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 runs/
+docs/
 .env
+.DS_Store
+.coverage
+htmlcov/
+.mypy_cache/
+dist/
+build/
+node_modules/
+*.log
+*.pid
+*.sqlite
+*.sqlite-*

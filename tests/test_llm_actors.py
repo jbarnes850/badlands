@@ -120,6 +120,32 @@ def test_openai_client_sends_vllm_structured_decision_config(monkeypatch: pytest
     assert body["chat_template_kwargs"] == {"enable_thinking": False}
 
 
+def test_openai_client_rejects_reasoning_only_response(monkeypatch: pytest.MonkeyPatch):
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "choices": [{"message": {"content": None, "reasoning": '{"action":"scan_network"}'}}],
+                    "usage": {"completion_tokens": 5},
+                }
+            ).encode()
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: Response())
+    client = OpenAICompatClient(base_url="http://llm.local/v1", api_key="EMPTY", model="model")
+
+    with pytest.raises(InvalidLLMDecision, match="returned reasoning content"):
+        client.complete_json([{"role": "user", "content": "choose"}])
+
+    assert client.last_completion_telemetry["final_invalid_count"] == 1
+    assert "reasoning" in client.last_completion_telemetry["invalid_decision_reason"]
+
+
 def test_repair_count_counts_attempts_not_failures():
     class MalformedTwiceClient(OpenAICompatClient):
         def __init__(self):
@@ -138,6 +164,33 @@ def test_repair_count_counts_attempts_not_failures():
     assert err.value.telemetry["repairs_attempted"] == 1
     assert err.value.telemetry["repair_invalid_count"] == 1
     assert err.value.telemetry["final_invalid_count"] == 1
+
+
+def test_invalid_confidence_is_not_cached(tmp_path: Path):
+    class BadConfidenceClient:
+        model = "fake"
+        last_completion_telemetry = {}
+
+        def complete_json(self, messages, *, model=None, validator=None):
+            raw = {
+                "intent": "complete mission work",
+                "action": "use_mission_app",
+                "parameters": {},
+                "confidence": "high",
+                "evidence_ids": [],
+                "rationale": "The mission app is visible.",
+                "expected_effect": "The user will try mission work.",
+                "risk": "The service may be unavailable.",
+            }
+            if validator is not None:
+                validator(raw)
+            return raw
+
+    actor = GreenUserLLM(cache_dir=tmp_path, seed=1, client=BadConfidenceClient())
+    with pytest.raises(InvalidLLMDecision, match="confidence must be a number"):
+        actor.decide({"mission": []})
+
+    assert list(tmp_path.glob("green_*.json")) == []
 
 
 def test_dotenv_loader_integrates_role_endpoints(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):

@@ -73,7 +73,7 @@ def decision_quality_report(events: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     return {
         "rubric_version": "ds27-role-output-rubric-v1",
-        "rubric_doc": "docs/model-output-rubric.md",
+        "rubric_reference": "built-in role-output heuristics",
         "scope": "descriptive trace-derived heuristics for reviewer inspection; not an automatic intelligence pass/fail grade",
         "per_role": per_role,
         "all_flags": all_flags,

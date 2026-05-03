@@ -191,7 +191,17 @@ class OpenAICompatClient:
         repair_messages: list[dict[str, str]] | None = None
         for attempt, max_tokens in enumerate((384, 512)):
             telemetry["attempt_count"] = attempt + 1
-            raw = self._complete(repair_messages or messages, model=model, max_tokens=max_tokens, json_schema=json_schema)
+            try:
+                raw = self._complete(repair_messages or messages, model=model, max_tokens=max_tokens, json_schema=json_schema)
+            except InvalidLLMDecision as exc:
+                telemetry["validation_error"] = exc.reason
+                telemetry["invalid_decision_reason"] = exc.reason
+                telemetry["initial_invalid_count"] += 1
+                telemetry["final_invalid_count"] += 1
+                telemetry["wall_latency_s"] = round(time.perf_counter() - started, 6)
+                exc.telemetry = telemetry
+                self.last_completion_telemetry = telemetry
+                raise exc
             telemetry["raw_outputs"].append(
                 {
                     "attempt": attempt + 1,
@@ -319,7 +329,17 @@ class OpenAICompatClient:
         msg = data["choices"][0]["message"]
         usage = data.get("usage", {})
         self._last_completion_tokens = int(usage.get("completion_tokens") or 0)
-        return msg.get("content") or msg.get("reasoning") or "{}"
+        content = msg.get("content")
+        reasoning = msg.get("reasoning")
+        if reasoning not in (None, ""):
+            raise InvalidLLMDecision(
+                "unknown",
+                {"message": msg},
+                "LLM returned reasoning content despite BADLANDS_LLM_ENABLE_THINKING=false",
+            )
+        if not isinstance(content, str) or not content.strip():
+            raise InvalidLLMDecision("unknown", {"message": msg}, "LLM returned no JSON content")
+        return content
 
     @staticmethod
     def _parse_json(content: str) -> dict[str, Any]:
@@ -437,7 +457,6 @@ class CachedLLMActor:
                     validation_error=str(exc),
                 )
                 raise InvalidLLMDecision(self.role, {}, str(exc), telemetry) from exc
-            path.write_text(json.dumps(raw, sort_keys=True, indent=2))
             telemetry = _actor_telemetry(
                 self,
                 key,
@@ -455,6 +474,8 @@ class CachedLLMActor:
             exc.telemetry = telemetry
             self.last_decision_telemetry = telemetry
             raise
+        if not cache_hit:
+            path.write_text(json.dumps(raw, sort_keys=True, indent=2))
         decision = LLMDecision.from_raw(raw)
         decision.inference_telemetry = telemetry
         self.last_decision_telemetry = telemetry
@@ -468,6 +489,10 @@ class CachedLLMActor:
             raise InvalidLLMDecision(self.role, raw, f"unsupported action {raw.get('action')!r}")
         if not isinstance(raw.get("parameters", {}), dict):
             raise InvalidLLMDecision(self.role, raw, "parameters must be an object")
+        if not isinstance(raw.get("confidence"), int | float) or isinstance(raw.get("confidence"), bool):
+            raise InvalidLLMDecision(self.role, raw, "confidence must be a number between 0 and 1")
+        if not 0 <= float(raw["confidence"]) <= 1:
+            raise InvalidLLMDecision(self.role, raw, "confidence must be between 0 and 1")
         if not isinstance(raw.get("evidence_ids"), list):
             raise InvalidLLMDecision(self.role, raw, "evidence_ids must be an array")
         evidence_ids = raw.get("evidence_ids", [])

@@ -1,0 +1,1006 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Badlands Operator</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #070909;
+        --surface: #0d1111;
+        --surface-2: #111716;
+        --surface-3: #151d1b;
+        --line: #283431;
+        --line-soft: rgba(40, 52, 49, 0.7);
+        --text: #ecf3ef;
+        --muted: #9aa8a2;
+        --dim: #64726d;
+        --good: #54d68e;
+        --warn: #d7a84b;
+        --bad: #ee6a5d;
+        --blue: #6cc8d8;
+        --ink: #030505;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "IBM Plex Sans Condensed", "Aptos Narrow", "DIN Condensed", "Helvetica Neue", sans-serif;
+        letter-spacing: 0;
+      }
+
+      main {
+        min-height: 100vh;
+        padding: 16px;
+      }
+
+      .screen {
+        max-width: 1680px;
+        margin: 0 auto;
+        display: grid;
+        gap: 12px;
+      }
+
+      .topbar {
+        order: 1;
+      }
+
+      .roles-panel {
+        order: 2;
+      }
+
+      .live-panel {
+        order: 3;
+      }
+
+      .context-panel {
+        order: 4;
+      }
+
+      .overview {
+        order: 5;
+      }
+
+      .body-grid {
+        order: 6;
+      }
+
+      .topbar,
+      .panel,
+      .stat,
+      .lane,
+      .path {
+        background: var(--surface);
+        border: 1px solid var(--line);
+      }
+
+      .topbar {
+        min-height: 76px;
+        display: grid;
+        grid-template-columns: 320px minmax(0, 1fr) 140px;
+        gap: 18px;
+        align-items: center;
+        padding: 14px 16px;
+      }
+
+      .brand {
+        display: grid;
+        gap: 5px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 25px;
+        line-height: 1;
+        font-weight: 900;
+      }
+
+      h2 {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      h3 {
+        font-size: 13px;
+        font-weight: 850;
+        text-transform: uppercase;
+      }
+
+      .small {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .mono {
+        font-family: "SFMono-Regular", "Cascadia Mono", "Menlo", monospace;
+        overflow-wrap: anywhere;
+      }
+
+      .campaign-line {
+        min-width: 0;
+        display: grid;
+        grid-template-columns: minmax(250px, 1.5fr) repeat(4, minmax(96px, 0.55fr));
+        gap: 8px;
+      }
+
+      .chip {
+        min-height: 46px;
+        padding: 8px 10px;
+        background: var(--ink);
+        border: 1px solid var(--line-soft);
+      }
+
+      .label {
+        display: block;
+        color: var(--dim);
+        font-size: 10px;
+        font-weight: 850;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .value {
+        min-width: 0;
+        margin-top: 3px;
+        font-size: 15px;
+        font-weight: 850;
+        overflow-wrap: anywhere;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-width: 126px;
+        height: 38px;
+        padding: 0 12px;
+        background: var(--ink);
+        border: 1px solid var(--line);
+        font-size: 12px;
+        font-weight: 900;
+        text-transform: uppercase;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--dim);
+      }
+
+      .dot.running,
+      .dot.completed {
+        background: var(--good);
+      }
+
+      .dot.blocked,
+      .dot.stopped,
+      .dot.failed {
+        background: var(--bad);
+      }
+
+      .grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .overview {
+        grid-template-columns: 1.15fr 0.85fr 0.85fr 0.85fr;
+      }
+
+      .body-grid {
+        grid-template-columns: minmax(0, 1.28fr) minmax(360px, 0.72fr);
+        align-items: start;
+      }
+
+      .context-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .stat {
+        min-height: 124px;
+        padding: 14px;
+        display: grid;
+        align-content: space-between;
+        gap: 12px;
+      }
+
+      .stat.primary {
+        background: var(--surface-2);
+      }
+
+      .number {
+        font-size: 43px;
+        line-height: 0.92;
+        font-weight: 950;
+      }
+
+      .subgrid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .mini {
+        padding-top: 8px;
+        border-top: 1px solid var(--line-soft);
+      }
+
+      .good {
+        color: var(--good);
+      }
+
+      .warn {
+        color: var(--warn);
+      }
+
+      .bad {
+        color: var(--bad);
+      }
+
+      .blue {
+        color: var(--blue);
+      }
+
+      .panel {
+        padding: 14px;
+      }
+
+      .panel-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .lanes {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .lane {
+        min-height: 210px;
+        padding: 12px;
+        background: var(--surface-2);
+        display: grid;
+        gap: 12px;
+        align-content: start;
+      }
+
+      .context-card {
+        min-height: 138px;
+        padding: 13px;
+        background: var(--surface-2);
+        border: 1px solid var(--line);
+        display: grid;
+        align-content: start;
+        gap: 9px;
+      }
+
+      .context-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .context-copy {
+        font-size: 17px;
+        font-weight: 850;
+        line-height: 1.18;
+      }
+
+      .lane-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .role-mark {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 12px;
+        font-weight: 900;
+        text-transform: uppercase;
+      }
+
+      .role-dot {
+        width: 10px;
+        height: 10px;
+        border: 1px solid currentColor;
+      }
+
+      .role-dot.attacker {
+        color: var(--bad);
+      }
+
+      .role-dot.defender {
+        color: var(--blue);
+      }
+
+      .role-dot.green {
+        color: var(--good);
+      }
+
+      .lane-metrics {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .lane-metric {
+        min-height: 54px;
+        padding: 8px;
+        background: var(--ink);
+        border: 1px solid var(--line-soft);
+      }
+
+      .decision {
+        min-height: 64px;
+        padding: 9px;
+        background: var(--surface);
+        border-left: 3px solid var(--line);
+      }
+
+      .decision.attacker {
+        border-left-color: var(--bad);
+      }
+
+      .decision.defender {
+        border-left-color: var(--blue);
+      }
+
+      .decision.green {
+        border-left-color: var(--good);
+      }
+
+      .curve {
+        width: 100%;
+        height: 172px;
+        display: block;
+        background: var(--ink);
+        border: 1px solid var(--line-soft);
+      }
+
+      .score-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .score {
+        min-height: 62px;
+        padding: 9px;
+        background: var(--ink);
+        border: 1px solid var(--line-soft);
+      }
+
+      .table {
+        display: grid;
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: minmax(120px, 0.8fr) minmax(58px, 0.25fr) minmax(0, 1.4fr);
+        gap: 10px;
+        padding: 9px 0;
+        border-top: 1px solid var(--line-soft);
+        align-items: baseline;
+      }
+
+      .row:first-child {
+        border-top: 0;
+      }
+
+      .timeline {
+        display: grid;
+        gap: 8px;
+      }
+
+      .event {
+        display: grid;
+        grid-template-columns: 72px 90px minmax(0, 1fr) 92px;
+        gap: 9px;
+        padding: 8px;
+        background: var(--ink);
+        border: 1px solid var(--line-soft);
+        align-items: baseline;
+      }
+
+      .event.important {
+        background: var(--surface-2);
+        border-color: var(--line);
+      }
+
+      .paths {
+        display: grid;
+        gap: 8px;
+      }
+
+      .path {
+        padding: 9px;
+        background: var(--ink);
+      }
+
+      .path .value {
+        font-size: 11px;
+      }
+
+      @media (max-width: 1180px) {
+        main {
+          padding: 10px;
+        }
+
+        .topbar,
+        .overview,
+        .body-grid,
+        .lanes,
+        .score-grid,
+        .context-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .campaign-line {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .status {
+          width: 100%;
+        }
+      }
+
+      @media (max-width: 620px) {
+        .campaign-line,
+        .lane-metrics,
+        .row,
+        .event {
+          grid-template-columns: 1fr;
+        }
+
+        .number {
+          font-size: 36px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="screen">
+        <header class="topbar">
+          <div class="brand">
+            <h1>Badlands</h1>
+            <p class="small">Mission cyber self-play evidence cockpit</p>
+          </div>
+          <div class="campaign-line">
+            <div class="chip"><span class="label">Campaign</span><div id="campaign-id" class="value mono">-</div></div>
+            <div class="chip"><span class="label">Episode</span><div id="episode" class="value">-</div></div>
+            <div class="chip"><span class="label">Elapsed</span><div id="elapsed" class="value">-</div></div>
+            <div class="chip"><span class="label">Mission clock</span><div id="mission-clock" class="value">-</div></div>
+            <div class="chip"><span class="label">Budget</span><div id="budget" class="value">-</div></div>
+          </div>
+          <div class="status"><span id="status-dot" class="dot"></span><span id="status">loading</span></div>
+        </header>
+
+        <section class="grid overview">
+          <div class="stat primary">
+            <div>
+              <h2>Mission / Security Risk</h2>
+              <div id="risk" class="number warn">-</div>
+            </div>
+            <div class="subgrid">
+              <div class="mini"><span class="label">Highest</span><div id="risk-high" class="value">-</div></div>
+              <div class="mini"><span class="label">Lowest</span><div id="risk-low" class="value">-</div></div>
+              <div class="mini"><span class="label">Replay</span><div id="replay" class="value">-</div></div>
+            </div>
+          </div>
+          <div class="stat">
+            <div>
+              <h2>Mission Work</h2>
+              <div id="mission" class="number good">-</div>
+            </div>
+            <p class="small">completed / failed tasks</p>
+          </div>
+          <div class="stat">
+            <div>
+              <h2>Token Spend</h2>
+              <div id="tokens-total" class="number">-</div>
+            </div>
+            <p id="token-rate" class="small">-</p>
+          </div>
+          <div class="stat">
+            <div>
+              <h2>Defense Harm</h2>
+              <div id="harm" class="number bad">-</div>
+            </div>
+            <p class="small">downtime plus lockout minutes</p>
+          </div>
+        </section>
+
+        <section class="panel context-panel">
+          <div class="panel-head">
+            <h2>Environment Context</h2>
+            <span class="small">role-valid objectives inside Mission Desk</span>
+          </div>
+          <div class="grid context-grid">
+            <article class="context-card">
+              <div class="context-title"><h3>Attacker</h3><span class="role-dot attacker"></span></div>
+              <div id="attacker-context" class="context-copy">-</div>
+              <p id="attacker-sub" class="small mono">-</p>
+            </article>
+            <article class="context-card">
+              <div class="context-title"><h3>Defender</h3><span class="role-dot defender"></span></div>
+              <div id="defender-context" class="context-copy">-</div>
+              <p id="defender-sub" class="small mono">-</p>
+            </article>
+            <article class="context-card">
+              <div class="context-title"><h3>User Sim</h3><span class="role-dot green"></span></div>
+              <div id="user-context" class="context-copy">-</div>
+              <p id="user-sub" class="small mono">-</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel live-panel">
+          <div class="panel-head">
+            <h2>Environment Interaction Log</h2>
+            <span class="small">canonical trace events, newest first</span>
+          </div>
+          <div id="live-log" class="timeline"></div>
+        </section>
+
+        <section class="panel roles-panel">
+          <div class="panel-head">
+            <h2>Live Self-Play</h2>
+            <span id="isolation-line" class="small">-</span>
+          </div>
+          <div id="roles" class="lanes"></div>
+        </section>
+
+        <section class="grid body-grid">
+          <div class="grid">
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Capability Curve</h2>
+                <span class="small">risk over wall-clock and tokens</span>
+              </div>
+              <canvas id="risk-line" class="curve" width="1100" height="260"></canvas>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Mission Effects</h2>
+                <span class="small">current episode score surface</span>
+              </div>
+              <div id="score-grid" class="score-grid"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Trace Evidence</h2>
+                <span class="small">nonzero fields cite event IDs</span>
+              </div>
+              <div id="evidence" class="table"></div>
+            </section>
+          </div>
+
+          <aside class="grid">
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Serving Readiness</h2>
+                <span class="small">target 262,144 context</span>
+              </div>
+              <div id="endpoints" class="table"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Recent Run Events</h2>
+                <span class="small">append-only operator log</span>
+              </div>
+              <div id="events" class="timeline"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Artifact Paths</h2>
+              </div>
+              <div id="paths" class="paths"></div>
+            </section>
+          </aside>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      const params = new URLSearchParams(location.search);
+      const statePath = params.get("state") || "";
+      const scenarioPath = params.get("scenario") || "/badlands/scenarios/mission_desk.json";
+      const roles = ["green", "attacker", "defender"];
+      const roleNames = { green: "Green user", attacker: "Attacker", defender: "Defender" };
+      const rolePurpose = {
+        green: "Keeps mission pressure alive",
+        attacker: "Explores and advances intrusion objectives",
+        defender: "Reduces risk while preserving mission continuity",
+      };
+
+      function absolute(path) {
+        if (!path) return null;
+        if (path.startsWith("http") || path.startsWith("/")) return path;
+        return `/${path}`;
+      }
+
+      function fmt(value) {
+        if (value === null || value === undefined) return "-";
+        if (typeof value === "number") return Number.isInteger(value) ? value.toLocaleString() : value.toFixed(3);
+        return String(value);
+      }
+
+      function duration(seconds) {
+        if (!Number.isFinite(seconds)) return "-";
+        const s = Math.max(0, Math.floor(seconds));
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const r = s % 60;
+        return `${h}h ${m}m ${r}s`;
+      }
+
+      function safe(text) {
+        return String(text ?? "-")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
+      async function fetchJson(path) {
+        if (!path) return null;
+        try {
+          const response = await fetch(`${absolute(path)}?t=${Date.now()}`);
+          if (!response.ok) return null;
+          return await response.json();
+        } catch {
+          return null;
+        }
+      }
+
+      async function fetchJsonl(path) {
+        if (!path) return [];
+        try {
+          const response = await fetch(`${absolute(path)}?t=${Date.now()}`);
+          if (!response.ok) return [];
+          const text = await response.text();
+          return text
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => JSON.parse(line));
+        } catch {
+          return [];
+        }
+      }
+
+      function metric(label, value, tone = "") {
+        return `<div class="lane-metric"><span class="label">${safe(label)}</span><div class="value ${tone}">${value}</div></div>`;
+      }
+
+      function drawRisk(points) {
+        const canvas = document.getElementById("risk-line");
+        const ctx = canvas.getContext("2d");
+        const width = canvas.width;
+        const height = canvas.height;
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = "#030505";
+        ctx.fillRect(0, 0, width, height);
+        ctx.strokeStyle = "#283431";
+        ctx.lineWidth = 1;
+        for (let i = 1; i < 5; i += 1) {
+          const y = (height / 5) * i;
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(width, y);
+          ctx.stroke();
+        }
+        if (!points.length) return;
+        const maxRisk = Math.max(1, ...points.map((p) => p.risk || 0));
+        ctx.strokeStyle = "#d7a84b";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        points.forEach((point, index) => {
+          const x = points.length === 1 ? width - 26 : 18 + (index / (points.length - 1)) * (width - 36);
+          const y = height - 18 - ((point.risk || 0) / maxRisk) * (height - 36);
+          if (index === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        points.forEach((point, index) => {
+          const x = points.length === 1 ? width - 26 : 18 + (index / (points.length - 1)) * (width - 36);
+          const y = height - 18 - ((point.risk || 0) / maxRisk) * (height - 36);
+          ctx.fillStyle = "#d7a84b";
+          ctx.fillRect(x - 3, y - 3, 6, 6);
+        });
+      }
+
+      function renderContext(scenario, traceEvents) {
+        const attacker = scenario?.attacker || {};
+        const protectedAsset = (attacker.protected_assets || [])[0] || {};
+        const objectives = (attacker.objectives || []).map((item) => item.type).filter(Boolean).join(", ");
+        const firstGreen = traceEvents.find((event) => event.type === "llm_decision" && event.agent === "green");
+        const task = firstGreen?.payload?.observation?.mission?.[0] || (scenario?.mission?.workflow_tasks || [])[0] || {};
+        const services = (task.required_services || scenario?.mission?.dependencies?.use_mission_app || []).join(", ");
+        const servicesDefended = ["mission_app", "file_share", "idp", "ticket", "telemetry"];
+
+        document.getElementById("attacker-context").textContent = protectedAsset.file
+          ? `Targeting ${protectedAsset.file} on ${protectedAsset.host_id || "mission file share"}`
+          : "Waiting for attacker target context";
+        document.getElementById("attacker-sub").textContent = attacker.initial_host
+          ? `initial foothold ${attacker.initial_host}; objectives ${objectives || "unknown"}`
+          : "no attacker context yet";
+
+        document.getElementById("defender-context").textContent = `Defending ${servicesDefended.join(", ")} for mission continuity`;
+        document.getElementById("defender-sub").textContent = protectedAsset.asset_id
+          ? `protected asset ${protectedAsset.asset_id}; file ${protectedAsset.file}; service ${protectedAsset.service_id}`
+          : "defender protects mission services and user workflow";
+
+        document.getElementById("user-context").textContent = task.task_id
+          ? `${task.workflow_id || "mission workflow"}: ${task.requested_action || task.task_type}`
+          : "Waiting for mission task";
+        document.getElementById("user-sub").textContent = task.required_role
+          ? `role ${task.required_role}; needs ${services || "mission services"}; deadline t+${fmt(task.deadline_at)}`
+          : "no user task context yet";
+      }
+
+      function roleLiveObjective(role, scenario, traceEvents) {
+        const attacker = scenario?.attacker || {};
+        const protectedAsset = (attacker.protected_assets || [])[0] || {};
+        const firstGreen = traceEvents.find((event) => event.type === "llm_decision" && event.agent === "green");
+        const task = firstGreen?.payload?.observation?.mission?.[0] || (scenario?.mission?.workflow_tasks || [])[0] || {};
+        if (role === "attacker") {
+          return protectedAsset.file ? `Attacking ${protectedAsset.file} on ${protectedAsset.host_id || "file share"}` : "Attacker target pending";
+        }
+        if (role === "defender") {
+          return protectedAsset.file ? `Defending ${protectedAsset.file}, mission app, identity, file share` : "Defending mission services";
+        }
+        return task.task_id ? `Mission task ${task.task_id}: ${task.requested_action || task.task_type}` : "Mission task pending";
+      }
+
+      function eventSummary(event) {
+        const payload = event.payload || {};
+        if (event.type === "llm_decision") {
+          return {
+            role: event.agent || payload.role || "agent",
+            action: payload.action || "decision",
+            detail: payload.intent || payload.rationale || "proposed action",
+            important: true,
+          };
+        }
+        if (event.type === "action_completed") {
+          const result = payload.success === false ? "failed" : "completed";
+          const target = payload.host_id || payload.user_id || payload.action || "";
+          return { role: event.agent || "env", action: result, detail: `${payload.action || "action"} ${target}`.trim(), important: true };
+        }
+        if (event.type === "action_requested" || event.type === "action_started") {
+          return { role: event.agent || "env", action: payload.action || event.type, detail: event.type.replace("_", " "), important: true };
+        }
+        if (event.type === "mission_task_event") {
+          return { role: "user", action: payload.status || "mission", detail: payload.task_id || payload.outcome || "mission task", important: true };
+        }
+        if (event.type === "security_impact_event") {
+          return { role: "security", action: payload.kind || "impact", detail: payload.host_ref || payload.service || payload.user || "security impact", important: true };
+        }
+        if (event.type === "alert_emitted") {
+          return { role: "sensor", action: payload.rule_id || "alert", detail: `${payload.severity || "unknown"} confidence ${fmt(payload.confidence)}`, important: true };
+        }
+        if (event.type === "telemetry_emitted") {
+          const ecs = payload.ecs || {};
+          return {
+            role: "telemetry",
+            action: ecs["event.action"] || payload.category || "event",
+            detail: ecs["user.name"] || ecs["host.name"] || ecs["destination.service"] || payload.category || "sensor event",
+            important: false,
+          };
+        }
+        if (event.type === "state_transition" && payload.kind?.includes("benign_noise")) {
+          return { role: "noise", action: payload.noise_kind || "benign noise", detail: payload.source || "background activity", important: false };
+        }
+        return null;
+      }
+
+      function renderLiveLog(traceEvents, operatorEvents) {
+        const traceItems = traceEvents
+          .map(eventSummary)
+          .map((item, index) => (item ? { ...item, source: traceEvents[index] } : null))
+          .filter((item) => item && item.important);
+        const operatorItems = operatorEvents.map((event) => ({
+          role: "operator",
+          action: event.type,
+          detail: event.payload?.campaign_id || event.payload?.trace_path || event.payload?.detail || "",
+          source: { timestamp: "-", event_id: event.wall_time },
+          important: false,
+        }));
+        const items = traceItems.length ? traceItems : operatorItems;
+        document.getElementById("live-log").innerHTML = items.slice(-12).reverse().map((item) => {
+          const source = item.source || {};
+          return `<div class="event ${item.important ? "important" : ""}">
+            <div class="label">t+${safe(source.timestamp)}</div>
+            <div class="label">${safe(item.role)}</div>
+            <div><div class="value">${safe(item.action)}</div><div class="small">${safe(item.detail)}</div></div>
+            <div class="mono small blue">${safe(source.event_id || "")}</div>
+          </div>`;
+        }).join("") || `<div class="event"><div class="label">log</div><div class="label">env</div><div class="small">waiting for trace events</div><div></div></div>`;
+      }
+
+      function renderRoles(state, episodeReport, scenario, traceEvents) {
+        const tokens = state.tokens || {};
+        const latency = state.latency_by_role || {};
+        const decisions = Object.fromEntries((episodeReport?.decisions || []).map((item) => [item.role, item]));
+        const invalid = state.invalid_decisions || {};
+        const repairs = state.repair_pressure || {};
+        document.getElementById("roles").innerHTML = roles
+          .map((role) => {
+            const decision = decisions[role] || {};
+            const lat = latency[role] || {};
+            return `<article class="lane">
+              <div class="lane-head">
+                <div class="role-mark"><span class="role-dot ${role}"></span>${roleNames[role]}</div>
+                <span class="small">${safe(rolePurpose[role])}</span>
+              </div>
+              <div class="decision ${role}">
+                <span class="label">current objective</span>
+                <div class="value">${safe(roleLiveObjective(role, scenario, traceEvents))}</div>
+              </div>
+              <div class="lane-metrics">
+                ${metric("tokens", fmt(tokens[role] || 0))}
+                ${metric("latency p50 / p95", `${fmt(lat.p50_s)} / ${fmt(lat.p95_s)}`)}
+                ${metric("invalid", fmt(invalid[role] || 0), invalid[role] ? "bad" : "good")}
+                ${metric("repairs", fmt(repairs[role] || 0), repairs[role] ? "warn" : "good")}
+              </div>
+              <div class="decision ${role}">
+                <span class="label">latest decision</span>
+                <div class="value">${safe(decision.action || "pending")}</div>
+                <p class="small mono">${safe(decision.event_id || "no event yet")}</p>
+              </div>
+            </article>`;
+          })
+          .join("");
+      }
+
+      function renderEndpoints(state) {
+        const contexts = state.served_context_tokens_by_role || {};
+        const models = state.model_id_by_role || {};
+        const endpoints = state.endpoint_by_role || {};
+        document.getElementById("endpoints").innerHTML = roles
+          .map((role) => {
+            const context = contexts[role] || 0;
+            const tone = context >= 262144 ? "good" : "bad";
+            return `<div class="row">
+              <div><span class="label">${safe(roleNames[role])}</span><div class="value ${tone}">${fmt(context)} ctx</div></div>
+              <div class="value ${tone}">${context >= 262144 ? "ready" : "blocked"}</div>
+              <div class="mono small">${safe(models[role])}<br>${safe(endpoints[role])}</div>
+            </div>`;
+          })
+          .join("");
+      }
+
+      function renderScores(scores) {
+        const items = [
+          ["credentials", scores.credentials_compromised_count || 0, "bad"],
+          ["lateral moves", scores.lateral_movement_count || 0, "bad"],
+          ["collection", scores.sensitive_files_accessed_count || 0, "bad"],
+          ["exfil units", scores.exfiltration_units || 0, "bad"],
+          ["disruptions", scores.service_disruption_count || 0, "bad"],
+          ["false positives", scores.false_positive_actions || 0, "warn"],
+          ["dwell minutes", scores.attacker_dwell_minutes || 0, "warn"],
+          ["defense score", scores.overall_defense_quality_score || 0, (scores.overall_defense_quality_score || 0) < 0 ? "bad" : "good"],
+        ];
+        document.getElementById("score-grid").innerHTML = items
+          .map(([label, value, tone]) => `<div class="score"><span class="label">${safe(label)}</span><div class="value ${tone}">${fmt(value)}</div></div>`)
+          .join("");
+      }
+
+      function renderEvidence(state) {
+        const scores = state.scores || {};
+        const evidence = state.evidence || {};
+        const rows = Object.entries(evidence)
+          .filter(([field]) => scores[field])
+          .slice(0, 8)
+          .map(([field, ids]) => `<div class="row"><div><span class="label">${safe(field)}</span></div><div class="value">${fmt(scores[field])}</div><div class="mono small blue">${safe((ids || []).slice(0, 6).join(", "))}</div></div>`);
+        document.getElementById("evidence").innerHTML = rows.length ? rows.join("") : `<div class="row"><div class="label">evidence</div><div class="value">0</div><div class="small">no nonzero score evidence yet</div></div>`;
+      }
+
+      function renderEvents(events) {
+        const latest = events.slice(-5).reverse();
+        document.getElementById("events").innerHTML = latest.length
+          ? latest
+              .map((event) => `<div class="event"><div class="label">op</div><div class="label">${safe(event.type)}</div><div><div class="value">${safe(event.payload?.campaign_id || event.payload?.trace_path || event.payload?.detail || "")}</div><div class="small mono">${safe(event.wall_time || "")}</div></div><div></div></div>`)
+              .join("")
+          : `<div class="event"><div class="label">op</div><div class="label">events</div><div class="small">waiting for operator log</div><div></div></div>`;
+      }
+
+      function renderPaths(paths) {
+        const keep = ["campaign_report", "operator_state", "operator_events", "endpoint_metrics", "last_episode_report"];
+        document.getElementById("paths").innerHTML = keep
+          .filter((key) => paths[key])
+          .map((key) => `<div class="path"><span class="label">${safe(key)}</span><div class="value mono">${safe(paths[key])}</div></div>`)
+          .join("");
+      }
+
+      async function load() {
+        if (!statePath) {
+          document.getElementById("status").textContent = "no state";
+          document.getElementById("status-dot").className = "dot failed";
+          document.getElementById("campaign-id").textContent = "set ?state=/runs/<campaign-id>/operator-state.json";
+          return;
+        }
+        const state = await fetchJson(statePath);
+        if (!state) {
+          document.getElementById("status").textContent = "offline";
+          document.getElementById("status-dot").className = "dot failed";
+          return;
+        }
+        const paths = state.paths || {};
+        const episodeReport = await fetchJson(paths.last_episode_report);
+        const events = await fetchJsonl(paths.operator_events);
+        const traceEvents = await fetchJsonl(state.replay?.last_trace);
+        const scenario = await fetchJson(scenarioPath);
+        const scores = state.scores || {};
+        const trend = state.score_trend_by_episode || [];
+        const latest = trend[trend.length - 1] || {};
+        const missionNow = Math.max(0, ...traceEvents.map((event) => Number(event.timestamp) || 0));
+        const status = state.status || "unknown";
+
+        document.getElementById("status").textContent = status;
+        document.getElementById("status-dot").className = `dot ${status}`;
+        document.getElementById("campaign-id").textContent = state.campaign_id || "-";
+        document.getElementById("episode").textContent = fmt(state.episode);
+        document.getElementById("elapsed").textContent = duration(state.elapsed_seconds);
+        document.getElementById("mission-clock").textContent = `t+${fmt(missionNow)}`;
+        document.getElementById("budget").textContent = duration(state.wall_clock_budget_seconds);
+        document.getElementById("risk").textContent = fmt(latest.risk || 0);
+        document.getElementById("risk-high").textContent = `ep ${fmt(state.current_highest_risk_episode?.episode)}`;
+        document.getElementById("risk-low").textContent = `ep ${fmt(state.current_lowest_risk_episode?.episode)}`;
+        document.getElementById("replay").innerHTML = state.replay?.ok ? '<span class="good">OK</span>' : '<span class="warn">pending</span>';
+        document.getElementById("mission").textContent = `${fmt(scores.mission_tasks_completed || 0)} / ${fmt(scores.mission_tasks_failed || 0)}`;
+        document.getElementById("tokens-total").textContent = fmt((state.tokens || {}).total || 0);
+        document.getElementById("token-rate").textContent = `${fmt((state.token_rate || {}).tokens_per_minute || 0)} tokens/min`;
+        document.getElementById("harm").textContent = fmt((scores.service_downtime_minutes || 0) + (scores.user_lockout_minutes || 0));
+
+        const isolation = state.role_isolation || {};
+        document.getElementById("isolation-line").innerHTML = isolation.separate_sdk_sessions && isolation.separate_campaign_memory && isolation.separate_trace_roles
+          ? '<span class="good">role isolation verified</span>'
+          : '<span class="bad">role isolation incomplete</span>';
+
+        renderRoles(state, episodeReport, scenario, traceEvents);
+        renderContext(scenario, traceEvents);
+        renderLiveLog(traceEvents, events);
+        renderEndpoints(state);
+        renderScores(scores);
+        renderEvidence(state);
+        renderEvents(events);
+        renderPaths(paths);
+        drawRisk(trend);
+      }
+
+      load();
+      setInterval(load, 2000);
+    </script>
+  </body>
+</html>

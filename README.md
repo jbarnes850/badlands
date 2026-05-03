@@ -1,92 +1,275 @@
 # Badlands
 
-Badlands is an always-on cyber self-play environment substrate. It is not another toy cyber benchmark; its first job is to prove that cyber self-play is meaningful only when the world being played in is valid.
+Badlands is a local cyber self-play measurement substrate for mission-realistic
+agent evaluation.
 
-## Core problem
+The project is built around one question: can we measure how mission risk changes
+when attacker, defender, and mission-user agents interact inside the same
+stateful environment, under role-valid observations, with replayable evidence?
 
-Before cyber self-play can be useful, we need to prove that the world being played in is valid.
+Badlands is not a benchmark leaderboard and not an offensive tool suite. It is a
+contained research environment for studying long-horizon cyber decision making
+under mission constraints.
 
-Mission owners need continuous, affordable, mission-realistic cyber self-play measurement: always-on environments where co-evolving attacker and defender agents stress-test mission systems under realistic operational constraints, so leaders can see how cyber risk changes as model capability, test-time compute, cost, and system state evolve.
+## Motivation
 
-## Environment-track first proof target
+Cyber defence is not a single-step classification problem. Real defenders operate
+under partial observation, noisy telemetry, concurrent user activity, delayed
+effects, and mission pressure. A defensive action that stops an intrusion can
+still be a bad action if it blocks the mission.
 
-The first Badlands milestone is **construct-valid measurement**, not a large open world and not inference optimization. The minimum environment must preserve the causal pattern of a real mission network:
+Recent work on autonomous cyber-defence environments argues that sim-to-real
+failure comes from two coupled gaps: the virtualisation gap between the simulated
+and real network, and the modelling gap induced by observations, actions,
+rewards, and time. That framing is useful because it moves the problem away from
+"can an agent win a game?" and toward "does the environment preserve the
+decision problem we claim to measure?"
 
-- attacker progress depends on persistence, credentials, lateral movement, noise, and timing;
-- defender uncertainty depends on logs, alerts, EDR-like telemetry, tickets, identity events, and delayed/noisy detections rather than simulator truth;
-- green/user activity creates the mission value to protect and the false-positive background that makes defense hard;
-- actions have duration, delayed effects, and overlap;
-- scoring penalizes both compromise and harmful defense, including false positives and mission disruption.
+The NCSC has made the applied version of the same point: frontier models are
+changing the cost, speed, and scale of cyber operations, while defenders retain an
+advantage only when they can shape their environment, maintain telemetry, and
+respond without creating larger operational failures.
 
-The first concrete world is the **Mission Desk enclave**: a small enterprise mission cell with an identity provider, file share, operator workstations, a mission application, email/ticket workflow, and SIEM/EDR-style telemetry. See `docs/minimum-valid-environment.md`.
+Badlands is an implementation of that measurement stance.
 
-## Design spine
+## What This Release Contains
 
-Badlands uses the taxonomy from *Building Better Environments for Autonomous Cyber Defence* (arXiv:2604.08805v1):
+The current release contains a small but complete mission world:
 
-- **Virtualisation gap**: whether network/host, user, and threat simulation reflect real dynamics.
-- **Modelling gap**: whether observations, actions, rewards, and time preserve the real decision problem.
+- an identity provider, mission application, file share, tickets, workstations,
+  dependency graph, and telemetry;
+- green mission-user activity that keeps normal work alive;
+- bounded attacker and defender action surfaces;
+- role-isolated observations for attacker, defender, and green/user agents;
+- canonical JSONL traces for every environment event;
+- replay scoring from trace evidence only;
+- campaign memory with role-isolated namespaces;
+- token, latency, invalid-decision, repair, replay, and endpoint accounting;
+- a read-only operator dashboard for live campaign inspection.
 
-The NCSC frontier-AI defender guidance reinforces the operational reason for this substrate: AI changes attacker cost, speed, scale, and test-time compute; defenders keep an advantage only if they can shape their environment, maintain high-quality telemetry, and respond without creating worse operational harm.
+The default scenario is `badlands/scenarios/mission_desk.json`.
 
-## Run
+## Main Claim
 
-Install dev dependencies and run checks with `uv`:
+Badlands makes cyber self-play measurable by tying every score and headline state
+back to JSONL evidence. The useful claim is not that an agent can attack. The
+useful claim is that a mission owner can repeatedly measure how attacker progress,
+defender quality, mission disruption, token spend, wall-clock time, and campaign
+memory evolve under fixed mission constraints.
+
+## Evidence Contract
+
+Badlands follows a simple evidence contract:
+
+- the JSONL trace is canonical;
+- scores are replayed from trace events, not hidden labels;
+- every nonzero score must cite trace event IDs;
+- attacker, defender, and green/user agents receive only role-valid observations;
+- campaign memory is extracted only from role-visible events;
+- invalid model behavior is recorded as measurement signal, not silently repaired
+  into success;
+- dashboard state is read-only and derived from run artifacts.
+
+The operator-facing artifacts are written under `runs/<campaign-id>/`:
+
+```text
+campaign-report.json
+operator-state.json
+operator-events.jsonl
+agents-sdk-sessions.sqlite
+live-serving-preflight.json
+endpoint-metrics.jsonl
+episode-000001.jsonl
+episode-000001-report.json
+episode-000002.jsonl
+episode-000002-report.json
+...
+```
+
+## Install
+
+Badlands uses Python 3.11+ and `uv`.
 
 ```bash
 uv sync --extra dev
 uv run --extra dev ruff check badlands tests
 uv run --extra dev python -m pytest -q
-uv run --extra dev python -m pytest -q tests/test_llm_actors.py
 ```
 
-Start the contained local mission service:
+## Run A Scripted Episode
+
+This path does not require model serving.
 
 ```bash
-docker compose -f infra/docker-compose.yml up --build
-# health: curl http://localhost:18080/health
-```
+uv run badlands-episode \
+  --seed 7 \
+  --defender evidence_gathering \
+  --trace runs/mission-desk.jsonl
 
-Run a seeded Mission Desk episode and replay scoring:
-
-```bash
-uv run badlands-episode --seed 7 --defender evidence_gathering --trace runs/mission-desk.jsonl
 uv run badlands-replay runs/mission-desk.jsonl
-
-# Optional scenario override
-uv run badlands-episode --scenario badlands/scenarios/mission_desk.json --trace runs/mission-desk.jsonl
-
-# Optional cached/live actor path
-uv run badlands-episode --green-actor llm --attacker-actor llm --defender-actor llm --trace runs/mission-desk-llm.jsonl
 ```
 
-Without installing scripts:
+Useful ablations:
 
 ```bash
-python3 -m badlands.cli --seed 7 --trace runs/mission-desk.jsonl
-python3 -m badlands.scoring.replay runs/mission-desk.jsonl
+uv run badlands-episode --seed 7 --no-green --trace runs/no-green.jsonl
+uv run badlands-episode --seed 7 --perfect-sensors --trace runs/perfect-sensors.jsonl
+uv run badlands-validity --out runs/validity
 ```
 
-## Initial artifacts
+## Configure Local Models
 
-- `docs/autonomy-contract.md` — canonical mission charter, invariants, stop/go gates, and planner/executor/reviewer protocols for autonomous issue execution.
-- `docs/execution-roadmap.md` — ordered remaining issue lane with per-issue contracts, validation expectations, deferred scope, and review questions.
-- `docs/overnight-runbook.md` — one-issue-at-a-time autonomous execution loop with Linear/session-history intake, live validation, run ledger, subagent review, commit, and continuation gates.
-- `docs/validation-matrix.md` — stable validation requirements by change type.
-- `docs/capability-curve-contract.md` — co-evolution definition, run tiers, comparison axes, required metadata, and served-context rules for long-horizon measurement.
-- `docs/run-ledger.md` and `docs/run-ledger.schema.json` — machine-readable run ledger contract for live, ablation, and long-horizon evidence.
-- `docs/decisions.md` — architectural decision log for scope and layering decisions.
-- `docs/architecture.md` — four-component architecture: attacker, defender, green/user simulator, and active network environment.
-- `docs/environment-contract.md` — precise hidden state, observation surfaces, action surfaces, event model, timing model, and trace/scoring requirements.
-- `docs/minimum-valid-environment.md` — narrative environment contract for the smallest plausible mission world.
-- `docs/substrate-review.md` — citation-grade substrate table with realism anchors, gaps, and intended Badlands use.
-- `docs/realism-provenance.md` — reviewer-facing provenance crosswalk tying implemented mechanisms to source anchors, local artifacts, and validation plans.
-- `docs/validity-experiments.md` — ablation matrix with expected directional outcomes and pass/fail criteria.
-- `docs/validation-checklist.md` — reviewer checklist derived from the virtualisation/modelling-gap framework.
-- `docs/implementation.md` — implemented vertical-slice architecture and realism-anchor mapping.
-- `docs/trace-schema.md` — JSONL trace schema summary.
-- `docs/reviewer-status.md` — satisfied and intentionally deferred contract items.
-- `docs/dataset-fixtures.md` — LANL-derived auth-affinity fixture provenance.
-- `docs/identity-service-contract.md` — identity provider service contract for authoritative auth/session/reset/credential state.
-- `docs/scenario-fixtures.md` — scenario schema, provenance rules, and arXiv/NCSC taxonomy mapping for fixture-driven worlds.
-- `docs/dgx-spark-live-inference.md` — opt-in Spark/vLLM live actor verification instructions, including current per-role attacker/defender/green endpoints.
+Badlands expects OpenAI-compatible local chat-completion endpoints. vLLM is the
+primary serving target, but the runner is configured by endpoint URL and model
+name rather than by provider.
+
+The generic variables apply to all roles:
+
+```bash
+export BADLANDS_LLM_BASE_URL=http://127.0.0.1:8000/v1
+export BADLANDS_LLM_MODEL=local-model-name
+export BADLANDS_LLM_API_KEY=EMPTY
+export BADLANDS_LLM_ENABLE_THINKING=false
+```
+
+Role-specific variables override the generic values:
+
+```bash
+export BADLANDS_ATTACKER_LLM_BASE_URL=http://127.0.0.1:18000/v1
+export BADLANDS_ATTACKER_LLM_MODEL=attacker-local-model
+export BADLANDS_DEFENDER_LLM_BASE_URL=http://127.0.0.1:18001/v1
+export BADLANDS_DEFENDER_LLM_MODEL=defender-local-model
+export BADLANDS_GREEN_LLM_BASE_URL=http://127.0.0.1:18001/v1
+export BADLANDS_GREEN_LLM_MODEL=green-local-model
+```
+
+Using the same endpoint for defender and green/user simulation is allowed. Using
+the same memory, session, cache key, actor identity, trace role, or telemetry
+bucket is not.
+
+For vLLM, Badlands sends structured JSON response formats and
+`chat_template_kwargs={"enable_thinking": false}`. The preflight fails if the
+endpoint returns reasoning content instead of JSON `message.content`.
+
+## Run A Live Episode With Local Models
+
+```bash
+uv run badlands-live-validate \
+  --seed 7000 \
+  --until 40 \
+  --trace runs/live-validation.jsonl \
+  --report runs/live-validation-report.json \
+  --cache runs/live-validation-cache \
+  --attacker-model "$BADLANDS_ATTACKER_LLM_MODEL" \
+  --defender-model "$BADLANDS_DEFENDER_LLM_MODEL" \
+  --green-model "$BADLANDS_GREEN_LLM_MODEL"
+```
+
+Then replay the trace:
+
+```bash
+uv run badlands-replay runs/live-validation.jsonl
+```
+
+## Run A Continuous Campaign
+
+The campaign runner repeats episodes until the wall-clock budget expires or a
+hard stop condition fires. It preserves one trace per episode, replays each
+completed trace, extracts role-visible memory, and maintains dashboard-readable
+state.
+
+```bash
+RUN_ID="262k-campaign-memory-6h-$(date +%Y%m%d-%H%M)"
+
+uv run badlands-campaign-run \
+  --duration-minutes 360 \
+  --episode-until 40 \
+  --seed-start 7000 \
+  --out "runs/${RUN_ID}" \
+  --sdk-mode direct \
+  --memory-mode campaign \
+  --served-context-target 262144
+```
+
+For a short local rehearsal:
+
+```bash
+uv run badlands-campaign-run \
+  --duration-minutes 0 \
+  --min-episodes 1 \
+  --max-episodes 1 \
+  --episode-until 20 \
+  --seed-start 7000 \
+  --out runs/rehearsal \
+  --sdk-mode direct \
+  --memory-mode campaign \
+  --served-context-target 262144
+```
+
+## Operator Dashboard
+
+The dashboard is static and read-only. It polls `operator-state.json`, the latest
+episode report, operator events, and the latest trace.
+
+From the repository root:
+
+```bash
+uv run --extra dev python -m http.server 8765 --bind 127.0.0.1
+```
+
+Open:
+
+```text
+http://127.0.0.1:8765/operator-ui/?state=/runs/<campaign-id>/operator-state.json
+```
+
+The first screen is the live three-agent interaction:
+
+- Green/User: the mission task and user-visible state.
+- Attacker: the current target and intrusion action.
+- Defender: protected assets, alerts, and response action.
+- Interaction log: canonical trace events, newest first, with event IDs.
+
+Metrics follow the interaction surface: elapsed time, tokens, replay status,
+endpoint health, mission score, security score, service downtime, compromised
+credentials, lateral movement, false positives, repairs, and evidence IDs.
+
+## Repository Layout
+
+```text
+badlands/
+  agents/        role actors, campaign memory, decision quality
+  campaigns/     continuous campaign controller
+  core/          environment, scenario, state, observations, trace
+  datasets/      small public-derived fixtures
+  network/       contained mission services
+  scenarios/     Mission Desk scenario
+  scoring/       replay scorer
+operator-ui/     read-only live dashboard
+infra/           local service compose file
+tests/           unit and integration tests
+```
+
+Generated traces, ledgers, caches, and dashboard state are written to `runs/` and
+are ignored by git.
+
+## Scope And Safety
+
+Badlands is a contained local cyber range. It does not provide arbitrary shell
+access, external targeting, agent-authored exploit tooling, model fine-tuning, or
+prompt/scaffold self-improvement. The action surfaces are bounded environment
+actions whose effects are recorded in JSONL.
+
+The current release is an environment and measurement substrate. It is not a
+claim that the default agents are strong, that the scenario is exhaustive, or
+that results transfer without calibration. The intended research use is to run
+controlled campaigns, inspect trace evidence, and compare capability curves under
+fixed scenario, model, scaffold, memory, and compute settings.
+
+## References
+
+- Chris Hicks et al. "Building Better Environments for Autonomous Cyber Defence."
+  arXiv:2604.08805v1, 2026. https://arxiv.org/pdf/2604.08805v1
+- Paul J. and Alan Steer. "Why cyber defenders need to be ready for frontier
+  AI." National Cyber Security Centre, 2026.
+  https://www.ncsc.gov.uk/blogs/why-cyber-defenders-need-to-be-ready-for-frontier-ai

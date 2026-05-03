@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 
 REPORT = Path("docs/realism-provenance.md")
 
@@ -48,6 +50,12 @@ STALE_SOURCE_URLS = {
     "https://www.cisa.gov/resources-tools/resources/incident-response-playbook",
     "https://github.com/dfki-in-sec/NASimEmu",
 }
+
+
+pytestmark = pytest.mark.skipif(
+    not REPORT.exists(),
+    reason="internal realism provenance docs are not included in public release checkouts",
+)
 
 
 def _table_rows(text: str) -> list[list[str]]:
