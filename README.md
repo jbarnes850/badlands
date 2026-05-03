@@ -1,22 +1,21 @@
 # Badlands
 
-Badlands is a local cyber self-play measurement substrate for mission-realistic
-agent evaluation.
+Badlands is a local cyber self-play substrate for mission-realistic,
+long-horizon agent evaluation.
 
-The project is built around one question: can we measure how mission risk changes
-when attacker, defender, and mission-user agents interact inside the same
-stateful environment, under role-valid observations, with replayable evidence?
+It measures how mission risk changes when attacker, defender, and mission-user
+agents interact inside the same stateful environment under role-valid
+observations, fixed operational constraints, and replayable evidence.
 
 Badlands is not a benchmark leaderboard and not an offensive tool suite. It is a
-contained research environment for studying long-horizon cyber decision making
-under mission constraints.
+contained research environment for studying autonomous cyber decision making,
+co-evolution, and capability curves under mission constraints.
 
 ## Why This Exists
 
-Cyber defence is not a single-step classification problem. Real defenders operate
-under partial observation, noisy telemetry, concurrent user activity, delayed
-effects, and mission pressure. A defensive action that stops an intrusion can
-still be a bad action if it blocks the mission.
+Real defenders operate under partial observation, noisy telemetry, concurrent
+user activity, delayed effects, and mission pressure. A defensive action that
+stops an intrusion can still be a bad action if it blocks the mission.
 
 Recent work on autonomous cyber-defence environments argues that sim-to-real
 failure comes from two coupled gaps: the virtualisation gap between the simulated
@@ -26,15 +25,24 @@ rewards, and time. That framing is useful because it moves the problem away from
 decision problem we claim to measure?"
 
 The NCSC has made the applied version of the same point: frontier models are
-changing the cost, speed, and scale of cyber operations, while defenders retain an
-advantage only when they can shape their environment, maintain telemetry, and
+changing the cost, speed, and scale of cyber operations, while defenders retain
+an advantage only when they can shape their environment, maintain telemetry, and
 respond without creating larger operational failures.
 
 Badlands is an implementation of that measurement stance.
 
-## Environment Structure
+## Environment Loop
 
-The current release contains a small but complete mission world:
+The current release contains a small but complete mission world where attacker
+and defender agents co-evolve through role-visible feedback while green/user
+activity keeps mission work alive. Within an
+episode, agents respond to the evolving environment state. Across episodes,
+role-isolated campaign memory carries forward trace-linked lessons without
+sharing hidden labels, scorer truth, or cross-role state.
+
+![Badlands self-play environment loop](assets/badlands-system-loop.png)
+
+Badlands includes:
 
 - an identity provider, mission application, file share, tickets, workstations,
   dependency graph, and telemetry;
