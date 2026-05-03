@@ -6,11 +6,11 @@ Derived from the virtualisation/modelling-gap taxonomy in arXiv:2604.08805v1 and
 
 - [ ] Network and host roles are tied to a named mission workflow, not arbitrary nodes.
 - [x] Host/service behavior includes operational characteristics: availability, degraded/unavailable failure states, user ownership, criticality, and dependencies.
-- [ ] Green users generate normal work, auth, files, email/tickets, and benign noise.
+- [x] Green users generate normal work, auth, files, tickets, and benign noise.
 - [ ] Green disruption changes mission score.
 - [ ] Red behavior is calibrated against adversary emulation or ATT&CK-mapped traces.
 - [ ] Red is not fully deterministic across episodes.
-- [ ] Sensor coverage, logging delay, dropped events, and detection noise are explicit.
+- [x] Sensor coverage, logging delay, dropped events, and detection noise are explicit.
 - [ ] A higher-fidelity replay/emulation path is identified for at least one attack chain.
 
 ## Modelling gap: sequence/time
@@ -26,7 +26,7 @@ Derived from the virtualisation/modelling-gap taxonomy in arXiv:2604.08805v1 and
 - [ ] No defender observation exposes hidden simulator truth.
 - [ ] Defender observations are logs, alerts, EDR-like telemetry, auth/network events, tickets, inventory, and delayed action results.
 - [ ] Alerts include source events and rule/provenance metadata.
-- [ ] Observations include false positives and incomplete evidence.
+- [x] Observations include false positives and incomplete evidence.
 - [ ] Attacker observations are limited to command/tool outputs and accessible resources.
 
 ## Modelling gap: actions

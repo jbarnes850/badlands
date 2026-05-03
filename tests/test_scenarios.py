@@ -55,6 +55,7 @@ def test_initial_state_is_fixture_driven(tmp_path: Path):
             "lateral_target_host": "files-1",
             "collection_target": "mission.txt",
         },
+        **{"benign_noise.events": []},
     )
     state = initial_state(seed=7, scenario=scenario_path)
     assert sorted(state.hosts) == ["app-1", "files-1", "idp-1", "ws-alice"]
@@ -64,7 +65,7 @@ def test_initial_state_is_fixture_driven(tmp_path: Path):
 
 
 def test_changing_green_task_schedule_changes_trace_behavior(tmp_path: Path):
-    short_scenario = _scenario_copy(tmp_path, **{"mission.green_task_schedule": [2]})
+    short_scenario = _scenario_copy(tmp_path, **{"mission.green_task_schedule": [2], "benign_noise.events": []})
     default_env = MissionDeskEnv(tmp_path / "default.jsonl", seed=7)
     short_env = MissionDeskEnv(tmp_path / "short.jsonl", seed=7, scenario=short_scenario)
     assert default_env.run(40)["mission_tasks_completed"] == 6
@@ -86,6 +87,14 @@ def test_scenario_fixture_truth_does_not_leak_to_observations(tmp_path: Path):
     assert "provenance" not in text
     assert "validation_plan" not in text
     assert "initial_compromised_hosts" not in text
+
+
+def test_scenario_loads_noise_and_sensor_profiles():
+    scenario = load_scenario()
+    kinds = {item["kind"] for item in scenario.benign_noise["events"]}
+    assert {"failed_auth_burst", "noisy_script", "file_access_burst", "service_health_blip", "ticket_spike"} <= kinds
+    assert scenario.sensor_model["categories"]["credential_access"]["delay"] > 0
+    assert scenario.sensor_model["categories"]["network"]["drop_rate"] > 0
 
 
 def test_scenario_validates_dependency_references(tmp_path: Path):

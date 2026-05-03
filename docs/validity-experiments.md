@@ -34,6 +34,27 @@ Before evaluating frontier agents, run simple policies to expose toy incentives:
 4. **Evidence-gathering defender**: triages before containment; should outperform destructive policies in full scoring.
 5. **Random defender**: sanity check for score scale.
 
+## Implemented DS-20 checks
+
+The current CLI exposes two DS-20 ablations:
+
+```bash
+uv run badlands-episode --seed 7 --trace runs/ds20-full.jsonl
+uv run badlands-episode --seed 7 --no-noise --trace runs/ds20-no-noise.jsonl
+uv run badlands-episode --seed 7 --perfect-sensors --trace runs/ds20-perfect-sensors.jsonl
+```
+
+The implemented smoke criteria are intentionally directional:
+
+- the full run emits mission/admin benign suspicious artifacts and overlapping
+  alert rules such as `badlands.credential_access` from both benign and attacker
+  telemetry;
+- `--no-noise` reduces benign alert pressure and analyst/false-positive cost
+  for the current baseline policy;
+- `--perfect-sensors` makes first alert delivery earlier and removes dropped or
+  delayed telemetry;
+- all nonzero score fields and alerts remain trace-backed with source event ids.
+
 ## Environment validity pass criteria
 
 The environment is plausible for first implementation if:

@@ -26,16 +26,28 @@ def assert_no_forbidden(obj: object) -> None:
             assert_no_forbidden(item)
 
 
-def defender_view(events: list[dict]) -> dict:
+def _visible_by_sensor(payload: dict, now: int | None) -> bool:
+    sensor = payload.get("sensor", {})
+    if sensor.get("dropped") or sensor.get("covered") is False:
+        return False
+    visible_at = sensor.get("visible_at")
+    return now is None or visible_at is None or int(visible_at) <= now
+
+
+def defender_view(events: list[dict], *, now: int | None = None) -> dict:
     visible_types = {"alert_emitted", "telemetry_emitted", "observation_delivered", "mission_task_event", "defense_harm_event"}
     obs = {"alerts": [], "telemetry": [], "tickets": [], "action_results": [], "service_health": []}
     for e in events:
+        if now is not None and int(e["timestamp"]) > now:
+            continue
         if e["type"] not in visible_types and e["agent"] != "defender":
             continue
         p = {**e["payload"], "event_id": e["event_id"]}
         if e["type"] == "alert_emitted":
             obs["alerts"].append(p)
         elif e["type"] == "telemetry_emitted":
+            if not _visible_by_sensor(p, now):
+                continue
             obs["telemetry"].append(p)
             ecs = p.get("ecs", {})
             if ecs.get("event.action") in {"ticket_created", "ticket_updated"}:

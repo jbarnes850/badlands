@@ -20,6 +20,7 @@ from badlands.live_validate import (
     _write_report,
     build_report,
     configured_endpoints,
+    prepare_live_schedule,
     preflight,
 )
 from badlands.scoring.replay import derive_scores
@@ -177,6 +178,72 @@ def test_report_extracts_telemetry_and_role_isolation(tmp_path: Path):
     assert report["role_isolation"]["role_scoped_cache_keys"]["ok"] is True
     assert report["deterministic_fan_in"]["observation_snapshot_before_fanout"] is True
     assert "DS-29 owns durable actor memory" in report["ds29_handoff"]["boundary"]
+
+
+def test_live_schedule_preserves_benign_noise_without_scripted_green(tmp_path: Path):
+    env = MissionDeskEnv(tmp_path / "live-schedule.jsonl", seed=7)
+    prepare_live_schedule(env)
+    env.run(12)
+    events = load_trace(tmp_path / "live-schedule.jsonl")
+    noise = [
+        e for e in events
+        if e["type"] == "state_transition" and e["payload"].get("kind") == "benign_noise_scheduled"
+    ]
+    mission = [e for e in events if e["type"] == "mission_task_event"]
+    assert [e["payload"]["noise_kind"] for e in noise] == ["failed_auth_burst", "noisy_script"]
+    assert mission == []
+
+
+def test_live_defender_decision_observation_has_no_benign_only_markers(tmp_path: Path):
+    trace = tmp_path / "live-observation.jsonl"
+    env = MissionDeskEnv(trace, seed=7)
+    prepare_live_schedule(env)
+    env.run(12)
+    observation = env.defender_observation()
+    decision_id = env.trace.emit(
+        "llm_decision",
+        env.now,
+        {
+            "role": "defender",
+            "observation": observation,
+            "observation_event_ids": [item["event_id"] for item in observation["alerts"] + observation["telemetry"]],
+            "raw_decision": {
+                "intent": "triage",
+                "action": "triage_alert",
+                "parameters": {},
+                "confidence": 0.5,
+                "evidence_ids": [],
+                "rationale": "Investigate ambiguous evidence before containment.",
+                "expected_effect": "Review alert context.",
+                "risk": "Delay may allow attacker progress.",
+            },
+            "intent": "triage",
+            "action": "triage_alert",
+            "parameters": {},
+            "confidence": 0.5,
+            "evidence_ids": [],
+            "rationale": "Investigate ambiguous evidence before containment.",
+            "expected_effect": "Review alert context.",
+            "risk": "Delay may allow attacker progress.",
+            "inference_telemetry": {},
+        },
+        agent="defender",
+    )
+    env.run(13)
+    events = load_trace(trace)
+    decision = [e for e in events if e["event_id"] == decision_id][0]
+    text = str(decision["payload"]["observation"])
+    assert not any(
+        marker in text
+        for marker in [
+            "false_positive",
+            "known_false_positive",
+            "benign_noise",
+            "benign_noise_scheduled",
+            "noise-000",
+            "badlands.alert.notes",
+        ]
+    )
 
 
 def test_malformed_outputs_are_preserved_on_invalid_decision(tmp_path: Path):

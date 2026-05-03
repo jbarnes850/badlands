@@ -49,6 +49,68 @@
       "use_mission_app": ["idp-1", "app-1", "files-1"]
     }
   },
+  "benign_noise": {
+    "description": "Mission/admin artifacts that can resemble suspicious telemetry without carrying hidden benign/malicious truth to actors.",
+    "events": [
+      {
+        "at": 5,
+        "kind": "failed_auth_burst",
+        "user": "carol",
+        "host": "ws-carol",
+        "attempts": 3,
+        "source": "LANL auth event shape plus common stale-password user error"
+      },
+      {
+        "at": 11,
+        "kind": "noisy_script",
+        "user": "dave",
+        "host": "ws-dave",
+        "process": "mission-cache-refresh",
+        "command_line": "mission-cache-refresh --sync --quiet",
+        "source": "OpTC endpoint process telemetry shape plus mission admin maintenance"
+      },
+      {
+        "at": 17,
+        "kind": "file_access_burst",
+        "user": "bob",
+        "host": "ws-bob",
+        "file": "mission.txt",
+        "count": 7,
+        "source": "Mission deadline file-read burst shaped like collection telemetry"
+      },
+      {
+        "at": 23,
+        "kind": "service_health_blip",
+        "service": "mission_app",
+        "duration": 2,
+        "source": "NCSC automated-response risk and service dependency monitoring"
+      },
+      {
+        "at": 29,
+        "kind": "ticket_spike",
+        "user": "erin",
+        "host": "ws-erin",
+        "count": 2,
+        "reason": "intermittent_latency",
+        "source": "Mission user reports as defender-facing uncertainty"
+      }
+    ]
+  },
+  "sensor_model": {
+    "description": "Small deterministic-by-seed sensor profile for DS-20 smoke runs. It models coverage, visibility delay, dropped events, and alert delay rather than full statistical reproduction.",
+    "default": {"coverage": 1.0, "drop_rate": 0.0, "delay": 1, "alert_delay": 2},
+    "categories": {
+      "auth": {"sensor_id": "idp-audit-log", "coverage": 1.0, "drop_rate": 0.0, "delay": 1, "alert_delay": 1},
+      "auth_anomaly": {"sensor_id": "idp-anomaly-log", "coverage": 0.9, "drop_rate": 0.05, "delay": 3, "alert_delay": 2},
+      "credential_access": {"sensor_id": "edr-credential-rule", "coverage": 0.85, "drop_rate": 0.1, "delay": 4, "alert_delay": 2},
+      "persistence": {"sensor_id": "edr-startup-monitor", "coverage": 0.8, "drop_rate": 0.1, "delay": 5, "alert_delay": 3},
+      "lateral_movement": {"sensor_id": "network-auth-correlation", "coverage": 0.75, "drop_rate": 0.15, "delay": 4, "alert_delay": 2},
+      "network": {"sensor_id": "zeek-flow-summary", "coverage": 0.7, "drop_rate": 0.2, "delay": 3, "alert_delay": 2},
+      "file": {"sensor_id": "file-share-audit", "coverage": 0.85, "drop_rate": 0.05, "delay": 2, "alert_delay": 2},
+      "service": {"sensor_id": "service-log-forwarder", "coverage": 0.9, "drop_rate": 0.05, "delay": 2, "alert_delay": 2},
+      "service_health": {"sensor_id": "service-health-monitor", "coverage": 0.85, "drop_rate": 0.05, "delay": 2, "alert_delay": 1}
+    }
+  },
   "services": [
     {"service_id": "idp", "host_id": "idp-1", "kind": "identity", "criticality": 5},
     {"service_id": "mission_app", "host_id": "app-1", "kind": "web_app", "criticality": 5, "depends_on": ["idp", "file_share"]},
@@ -90,6 +152,20 @@
       "source": "Mordor/CALDERA/ATT&CK-style intrusion chain used as current validation plan",
       "url": "https://caldera.mitre.org/",
       "validation_plan": "Calibrate attacker action prerequisites and artifacts against CALDERA or ATT&CK-mapped replay traces."
+    },
+    {
+      "field": "benign_noise",
+      "taxonomy": "virtualisation:user-simulation",
+      "source": "LANL auth/process/service event shapes, OpTC endpoint telemetry shape, and NCSC warning about benign operational activity plus harmful automated response",
+      "url": "https://csr.lanl.gov/data/cyber1/",
+      "validation_plan": "Replace heuristic rates with explicit LANL/OpTC/Mordor-derived calibration tables in DS-25/DS-26."
+    },
+    {
+      "field": "sensor_model",
+      "taxonomy": "modelling:observation",
+      "source": "arXiv 2604.08805v1 observation modelling guidance plus ECS/Sigma/Elastic-style alert-source provenance",
+      "url": "https://arxiv.org/abs/2604.08805",
+      "validation_plan": "Calibrate coverage, drop, and delay profiles against real log pipelines or emulated telemetry during calibration work."
     }
   ]
 }

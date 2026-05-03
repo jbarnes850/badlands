@@ -232,6 +232,11 @@ def _log(args: argparse.Namespace, message: str) -> None:
         print(message, flush=True)
 
 
+def prepare_live_schedule(env: MissionDeskEnv) -> None:
+    env.queue.clear()
+    env._schedule_benign_noise()
+
+
 async def run_live_episode(args: argparse.Namespace) -> dict[str, Any]:
     _log(args, f"[live] starting bounded episode seed={args.seed} until={args.until} trace={args.trace}")
     env = MissionDeskEnv(
@@ -240,7 +245,7 @@ async def run_live_episode(args: argparse.Namespace) -> dict[str, Any]:
         service_url=args.service_url,
         scenario=args.scenario,
     )
-    env.queue.clear()
+    prepare_live_schedule(env)
     states = _live_actor_states(env, args)
     invalid_counts = {role: 0 for role in ROLE_ORDER}
     start = time.perf_counter()

@@ -11,7 +11,7 @@ from badlands.scoring.replay import derive_scores
 
 
 def args(tmp_path: Path, **kw):
-    base = dict(trace=tmp_path / "trace.jsonl", seed=7, until=60, defender="evidence_gathering", no_persistence=False, no_green=False, magic_observations=False, service_url=None, llm_cache=tmp_path / "llm", green_actor="scripted", attacker_actor="scripted", defender_actor="baseline")
+    base = dict(trace=tmp_path / "trace.jsonl", seed=7, until=60, defender="evidence_gathering", no_persistence=False, no_green=False, no_noise=False, perfect_sensors=False, magic_observations=False, service_url=None, llm_cache=tmp_path / "llm", green_actor="scripted", attacker_actor="scripted", defender_actor="baseline")
     base.update(kw)
     return Namespace(**base)
 
@@ -70,6 +70,77 @@ def test_magic_observation_ablation_changes_outcome(tmp_path: Path):
     normal = run_episode(args(tmp_path, trace=tmp_path / "normal.jsonl", defender="alert_label"))
     magic = run_episode(args(tmp_path, trace=tmp_path / "magic.jsonl", defender="alert_label", magic_observations=True))
     assert magic["true_positive_actions"] > normal["true_positive_actions"]
+
+
+def test_benign_noise_emits_trace_backed_ambiguous_alerts(tmp_path: Path):
+    run_episode(args(tmp_path, trace=tmp_path / "noise.jsonl"))
+    events = load_trace(tmp_path / "noise.jsonl")
+    noise = [
+        e for e in events
+        if e["type"] == "state_transition" and e["payload"].get("kind") == "benign_noise_scheduled"
+    ]
+    assert {e["payload"]["noise_kind"] for e in noise} >= {"failed_auth_burst", "noisy_script", "file_access_burst"}
+    alerts = [e for e in events if e["type"] == "alert_emitted"]
+    assert alerts
+    assert all(e["payload"]["source_event_ids"] for e in alerts)
+    credential_alerts = [e for e in alerts if e["payload"]["rule_id"] == "badlands.credential_access"]
+    assert len(credential_alerts) >= 2
+    assert all("known_false_positive_notes" not in e["payload"] for e in credential_alerts)
+    assert_no_forbidden(defender_view(events))
+
+
+def test_sensor_delay_drop_and_perfect_sensor_ablation(tmp_path: Path):
+    run_episode(args(tmp_path, trace=tmp_path / "default.jsonl"))
+    run_episode(args(tmp_path, trace=tmp_path / "perfect.jsonl", perfect_sensors=True))
+    default_events = load_trace(tmp_path / "default.jsonl")
+    perfect_events = load_trace(tmp_path / "perfect.jsonl")
+    default_telemetry = [e for e in default_events if e["type"] == "telemetry_emitted"]
+    perfect_telemetry = [e for e in perfect_events if e["type"] == "telemetry_emitted"]
+    assert any(e["payload"]["sensor"]["dropped"] for e in default_telemetry)
+    assert any(e["payload"]["sensor"]["visible_at"] and e["payload"]["sensor"]["visible_at"] > e["timestamp"] for e in default_telemetry)
+    assert not any(e["payload"]["sensor"]["dropped"] for e in perfect_telemetry)
+    assert all(e["payload"]["sensor"]["visible_at"] == e["timestamp"] for e in perfect_telemetry)
+    default_first_alert = min(e["timestamp"] for e in default_events if e["type"] == "alert_emitted")
+    perfect_first_alert = min(e["timestamp"] for e in perfect_events if e["type"] == "alert_emitted")
+    assert perfect_first_alert < default_first_alert
+
+
+def test_no_noise_ablation_reduces_false_positive_pressure(tmp_path: Path):
+    full = run_episode(args(tmp_path, trace=tmp_path / "full.jsonl"))
+    no_noise = run_episode(args(tmp_path, trace=tmp_path / "no-noise.jsonl", no_noise=True))
+    full_events = load_trace(tmp_path / "full.jsonl")
+    no_noise_events = load_trace(tmp_path / "no-noise.jsonl")
+    assert len([e for e in full_events if e["type"] == "alert_emitted"]) > len([e for e in no_noise_events if e["type"] == "alert_emitted"])
+    assert full["false_positive_actions"] > no_noise["false_positive_actions"]
+    assert full["analyst_minutes"] > no_noise["analyst_minutes"]
+
+
+def test_defender_observation_respects_sensor_visibility(tmp_path: Path):
+    env = MissionDeskEnv(tmp_path / "visibility.jsonl", seed=7)
+    env.run(5)
+    early = env.defender_observation()
+    assert "bad_password_burst" not in str(early)
+    env.run(12)
+    late = env.defender_observation()
+    assert "bad_password_burst" in str(late)
+    assert "noise-000-failed_auth_burst" not in str(late)
+    assert_no_forbidden(late)
+
+
+def test_defender_observation_does_not_expose_benign_only_markers(tmp_path: Path):
+    run_episode(args(tmp_path, trace=tmp_path / "leak.jsonl"))
+    events = load_trace(tmp_path / "leak.jsonl")
+    obs_text = str(defender_view(events))
+    forbidden_markers = [
+        "false_positive",
+        "known_false_positive",
+        "benign_noise",
+        "benign_noise_scheduled",
+        "noise-000",
+        "noise-001",
+        "badlands.alert.notes",
+    ]
+    assert not any(marker in obs_text for marker in forbidden_markers)
 
 
 def test_score_snapshot_has_evidence_references(tmp_path: Path):

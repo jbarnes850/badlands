@@ -29,6 +29,16 @@ class Scheduled:
     fn: Callable = field(compare=False)
 
 
+@dataclass(frozen=True)
+class SensorDecision:
+    sensor_id: str
+    covered: bool
+    dropped: bool
+    visibility_delay: int
+    visible_at: int | None
+    alert_delay: int
+
+
 class MissionDeskEnv:
     def __init__(
         self,
@@ -37,6 +47,8 @@ class MissionDeskEnv:
         *,
         no_persistence: bool = False,
         no_green: bool = False,
+        no_noise: bool = False,
+        perfect_sensors: bool = False,
         magic_observations: bool = False,
         service_url: str | None = None,
         user_simulator: Any | None = None,
@@ -53,6 +65,8 @@ class MissionDeskEnv:
             raise ValueError("MissionDeskEnv requires a loaded scenario")
         self.no_persistence = no_persistence
         self.no_green = no_green
+        self.no_noise = no_noise
+        self.perfect_sensors = perfect_sensors
         self.magic_observations = magic_observations
         self.run_id = f"run-{seed}-{trace_path.stem}"
         self.service_url = service_url.rstrip("/") if service_url else None
@@ -76,6 +90,8 @@ class MissionDeskEnv:
         if not no_green:
             for i, t in enumerate(self.scenario.green_task_schedule):
                 self.schedule(t, lambda i=i: self.green_task(i))
+        if not no_noise and not no_green:
+            self._schedule_benign_noise()
 
     def _ensure_identity_service(self) -> None:
         if self.service_url is None:
@@ -218,28 +234,246 @@ class MissionDeskEnv:
         return score
 
     def telemetry(self, category: str, data: dict, *, parents: list[str] | None = None) -> str:
-        payload = {"category": category, "ecs": data}
+        sensor = self._sensor_decision(category)
+        payload = {"category": category, "ecs": data, "sensor": self._sensor_payload(sensor)}
         eid = self.trace.emit("telemetry_emitted", self.now, payload, parents=parents)
         self.state.telemetry.append(payload)
-        if category in {"credential_access", "persistence", "lateral_movement"}:
-            self.schedule(2, lambda eid=eid, category=category, data=data: self.alert(category, data, [eid]))
+        alert_rule = str(data.get("badlands.alert.rule", category))
+        if category in {"credential_access", "persistence", "lateral_movement"} or data.get("badlands.alert.rule"):
+            if sensor.covered and not sensor.dropped:
+                delay = sensor.visibility_delay + sensor.alert_delay
+                self.schedule(delay, lambda eid=eid, rule=alert_rule, data=data: self.alert(rule, data, [eid]))
         return eid
 
     def alert(self, rule: str, data: dict, parents: list[str]) -> None:
-        payload = {"rule_id": f"badlands.{rule}", "severity": "high", "confidence": 0.72, "source_event_ids": parents, "affected": data, "attck": ["TA0006" if rule == "credential_access" else "TA0003"]}
+        payload = {
+            "rule_id": f"badlands.{rule}",
+            "severity": data.get("badlands.alert.severity", "high"),
+            "confidence": float(data.get("badlands.alert.confidence", 0.72)),
+            "source_event_ids": parents,
+            "affected": {key: value for key, value in data.items() if not key.startswith("badlands.alert.")},
+            "attck": ["TA0006" if rule == "credential_access" else "TA0003"],
+        }
         self.state.alerts.append(payload)
         self.trace.emit("alert_emitted", self.now, payload, parents=parents)
 
     def defender_observation(self) -> dict[str, Any]:
-        obs = defender_view(self.trace.events)
+        obs = defender_view(self.trace.events, now=self.now)
         obs["inventory"] = [
             {"host_id": h.host_id, "role": h.role, "owner": h.owner, "criticality": h.criticality, "isolated": h.isolated}
             for h in self.state.hosts.values()
         ]
         obs["service_inventory"] = public_dependency_inventory(self.dependency_graph)
+        obs["sensor_status"] = self._public_sensor_status()
         if self.magic_observations:
             obs["magic"] = {"suspect_host": self.state.attacker_host}
         return obs
+
+    def _sensor_decision(self, category: str) -> SensorDecision:
+        profile = self._sensor_profile(category)
+        sensor_id = str(profile.get("sensor_id", f"badlands-{category}-sensor"))
+        if self.perfect_sensors:
+            return SensorDecision(sensor_id, True, False, 0, self.now, 0)
+        coverage = float(profile.get("coverage", 1.0))
+        drop_rate = float(profile.get("drop_rate", 0.0))
+        delay = int(profile.get("delay", 0))
+        alert_delay = int(profile.get("alert_delay", 2))
+        covered = self.rng.random() <= coverage
+        dropped = covered and self.rng.random() < drop_rate
+        return SensorDecision(
+            sensor_id=sensor_id,
+            covered=covered,
+            dropped=dropped,
+            visibility_delay=delay,
+            visible_at=self.now + delay if covered and not dropped else None,
+            alert_delay=alert_delay,
+        )
+
+    def _sensor_payload(self, sensor: SensorDecision) -> dict[str, Any]:
+        return {
+            "sensor_id": sensor.sensor_id,
+            "covered": sensor.covered,
+            "dropped": sensor.dropped,
+            "visibility_delay": sensor.visibility_delay,
+            "visible_at": sensor.visible_at,
+            "alert_delay": sensor.alert_delay,
+            "mode": "perfect" if self.perfect_sensors else "scenario",
+        }
+
+    def _sensor_profile(self, category: str) -> dict[str, Any]:
+        model = self.scenario.sensor_model or {}
+        default = dict(model.get("default", {}))
+        category_profile = dict(model.get("categories", {}).get(category, {}))
+        return {**default, **category_profile}
+
+    def _public_sensor_status(self) -> dict[str, Any]:
+        model = self.scenario.sensor_model or {}
+        categories = model.get("categories", {})
+        return {
+            "mode": "perfect" if self.perfect_sensors else "scenario",
+            "categories": {
+                name: {
+                    "sensor_id": profile.get("sensor_id", f"badlands-{name}-sensor"),
+                    "coverage": 1.0 if self.perfect_sensors else profile.get("coverage", model.get("default", {}).get("coverage", 1.0)),
+                    "drop_rate": 0.0 if self.perfect_sensors else profile.get("drop_rate", model.get("default", {}).get("drop_rate", 0.0)),
+                    "delay": 0 if self.perfect_sensors else profile.get("delay", model.get("default", {}).get("delay", 0)),
+                }
+                for name, profile in sorted(categories.items())
+            },
+        }
+
+    def _visible_telemetry(self, *, host: str | None = None, category: str | None = None) -> list[dict[str, Any]]:
+        visible: list[dict[str, Any]] = []
+        for item in self.state.telemetry:
+            sensor = item.get("sensor", {})
+            if sensor.get("dropped") or sensor.get("covered") is False:
+                continue
+            if sensor.get("visible_at") is not None and int(sensor["visible_at"]) > self.now:
+                continue
+            if category is not None and item.get("category") != category:
+                continue
+            ecs = item.get("ecs", {})
+            if host is not None and host not in {ecs.get("host.name"), ecs.get("source.host"), ecs.get("destination.host")}:
+                continue
+            visible.append(item)
+        return visible
+
+    def _schedule_benign_noise(self) -> None:
+        for idx, item in enumerate(self.scenario.benign_noise.get("events", [])):
+            delay = int(item.get("at", 0))
+            self.schedule(delay, lambda idx=idx, item=item: self._emit_benign_noise(idx, item))
+
+    def _emit_benign_noise(self, idx: int, item: dict[str, Any]) -> None:
+        kind = str(item["kind"])
+        user = str(item.get("user", "alice"))
+        host = str(item.get("host", self.state.users.get(user, next(iter(self.state.users.values()))).host_id))
+        noise_id = f"noise-{idx:03d}-{kind}"
+        parent = self.trace.emit(
+            "state_transition",
+            self.now,
+            {
+                "kind": "benign_noise_scheduled",
+                "noise_id": noise_id,
+                "noise_kind": kind,
+                "source": item.get("source", "scenario.benign_noise"),
+            },
+            agent="green",
+        )
+        if kind == "unusual_login":
+            login = self._idp_post("/idp/login", {"user": user, "host": host, "password": f"{user}-pw"}, user=user)
+            self.telemetry(
+                "auth_anomaly",
+                {
+                    "event.category": "authentication",
+                    "event.action": "user_login",
+                    "event.outcome": "success",
+                    "event.reason": "unusual_source_host",
+                    "user.name": user,
+                    "source.host": host,
+                    "badlands.alert.rule": "credential_access",
+                    "badlands.alert.severity": "medium",
+                    "badlands.alert.confidence": 0.41,
+                },
+                parents=[parent, *login[2]],
+            )
+        elif kind == "failed_auth_burst":
+            events: list[str] = []
+            for _ in range(int(item.get("attempts", 2))):
+                _, _, attempt_events = self._idp_post("/idp/login", {"user": user, "host": host, "password": "wrong-password"}, user=user)
+                events.extend(attempt_events)
+            self.telemetry(
+                "credential_access",
+                {
+                    "event.category": "authentication",
+                    "event.action": "user_login",
+                    "event.outcome": "failure",
+                    "event.reason": "bad_password_burst",
+                    "user.name": user,
+                    "source.host": host,
+                    "badlands.alert.severity": "medium",
+                    "badlands.alert.confidence": 0.46,
+                },
+                parents=[parent, *events],
+            )
+        elif kind == "noisy_script":
+            self.telemetry(
+                "persistence",
+                {
+                    "event.category": "process",
+                    "event.action": "start",
+                    "process.name": str(item.get("process", "mission-cache-refresh")),
+                    "process.command_line": str(item.get("command_line", "mission-cache-refresh --sync")),
+                    "host.name": host,
+                    "user.name": user,
+                    "badlands.alert.severity": "medium",
+                    "badlands.alert.confidence": 0.38,
+                },
+                parents=[parent],
+            )
+        elif kind == "file_access_burst":
+            self.telemetry(
+                "file",
+                {
+                    "event.category": "file",
+                    "event.action": "read",
+                    "file.name": str(item.get("file", self.scenario.attacker["collection_target"])),
+                    "file.path": f"/share/{item.get('file', self.scenario.attacker['collection_target'])}",
+                    "event.count": int(item.get("count", 5)),
+                    "host.name": host,
+                    "user.name": user,
+                    "badlands.alert.rule": "collection",
+                    "badlands.alert.severity": "medium",
+                    "badlands.alert.confidence": 0.44,
+                },
+                parents=[parent],
+            )
+        elif kind == "service_health_blip":
+            service = str(item.get("service", self.scenario.mission_service_id))
+            changed = self._set_dependency_state(
+                self._service_node(service),
+                DEGRADED,
+                "benign_service_health_blip",
+                parent=parent,
+                agent="green",
+            )
+            self.telemetry(
+                "service_health",
+                {
+                    "event.category": "service",
+                    "event.action": "health_check",
+                    "event.outcome": "failure",
+                    "event.reason": "transient_degraded",
+                    "service.name": service,
+                    "badlands.alert.rule": "service_health",
+                    "badlands.alert.severity": "low",
+                    "badlands.alert.confidence": 0.35,
+                },
+                parents=[parent, *changed],
+            )
+            self.schedule(int(item.get("duration", 2)), lambda service=service, parent=parent: self._set_dependency_state(self._service_node(service), AVAILABLE, "benign_service_health_recovered", parent=parent, agent="green"))
+        elif kind == "ticket_spike":
+            events: list[str] = []
+            for n in range(int(item.get("count", 2))):
+                ticket = self._create_ticket(user=user, host=host, task_id=f"mission-support-{idx:03d}-{n}", reason=str(item.get("reason", "intermittent_latency")))
+                events.extend(ticket["events"])
+            self.telemetry(
+                "service",
+                {
+                    "event.category": "service",
+                    "event.action": "ticket_created",
+                    "event.outcome": "success",
+                    "event.reason": str(item.get("reason", "intermittent_latency")),
+                    "user.name": user,
+                    "source.host": host,
+                    "destination.service": "ticket",
+                    "badlands.alert.rule": "ticket_spike",
+                    "badlands.alert.severity": "low",
+                    "badlands.alert.confidence": 0.34,
+                },
+                parents=[parent, *events],
+            )
+        else:
+            raise ValueError(f"unknown benign noise kind {kind}")
 
     def request(
         self,
@@ -682,9 +916,9 @@ class MissionDeskEnv:
             payload["case_note"] = "linked source telemetry reviewed"
         elif action == "query_endpoint":
             host = params.get("host_id", self.scenario.attacker["initial_host"])
-            payload["events"] = [t for t in self.state.telemetry if t["ecs"].get("host.name") == host][:5]
+            payload["events"] = self._visible_telemetry(host=host)[:5]
         elif action == "query_identity":
-            payload["auth_events"] = [t for t in self.state.telemetry if t["category"] == "auth"][-5:]
+            payload["auth_events"] = self._visible_telemetry(category="auth")[-5:]
         elif action == "isolate_host":
             host = params.get("host_id", self.scenario.attacker["initial_host"])
             self.state.hosts[host].isolated = True

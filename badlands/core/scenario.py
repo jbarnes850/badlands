@@ -19,6 +19,8 @@ class Scenario:
     services: list[dict[str, Any]]
     mission: dict[str, Any]
     attacker: dict[str, Any]
+    benign_noise: dict[str, Any]
+    sensor_model: dict[str, Any]
     provenance: list[dict[str, Any]]
     source_path: Path = field(compare=False)
 
@@ -67,6 +69,8 @@ def load_scenario(path: Path | str = DEFAULT_SCENARIO_PATH) -> Scenario:
         services=list(raw.get("services", [])),
         mission=dict(raw["mission"]),
         attacker=dict(raw["attacker"]),
+        benign_noise=dict(raw.get("benign_noise", {})),
+        sensor_model=dict(raw.get("sensor_model", {})),
         provenance=list(raw.get("provenance", [])),
         source_path=scenario_path,
     )
@@ -103,6 +107,21 @@ def validate_scenario(scenario: Scenario) -> None:
         for dependency in dependencies:
             if dependency not in host_ids and dependency not in service_ids:
                 raise ValueError(f"mission dependency {task} references unknown host/service {dependency}")
+    for item in scenario.benign_noise.get("events", []):
+        if item.get("host") and item["host"] not in host_ids:
+            raise ValueError(f"benign noise event references unknown host {item['host']}")
+        if item.get("user") and item["user"] not in user_ids:
+            raise ValueError(f"benign noise event references unknown user {item['user']}")
+        if item.get("service") and item["service"] not in service_ids:
+            raise ValueError(f"benign noise event references unknown service {item['service']}")
+    for category, profile in scenario.sensor_model.get("categories", {}).items():
+        if not isinstance(profile, dict):
+            raise ValueError(f"sensor model category {category} must be an object")
+        for key in ("coverage", "drop_rate"):
+            if key in profile and not 0 <= float(profile[key]) <= 1:
+                raise ValueError(f"sensor model {category}.{key} must be between 0 and 1")
+        if "delay" in profile and int(profile["delay"]) < 0:
+            raise ValueError(f"sensor model {category}.delay must be non-negative")
 
     attacker = scenario.attacker
     if attacker["initial_host"] not in host_ids:

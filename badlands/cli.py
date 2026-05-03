@@ -109,6 +109,8 @@ def run_episode(args: argparse.Namespace) -> dict:
         seed=args.seed,
         no_persistence=args.no_persistence,
         no_green=args.no_green,
+        no_noise=getattr(args, "no_noise", False),
+        perfect_sensors=getattr(args, "perfect_sensors", False),
         magic_observations=args.magic_observations,
         service_url=args.service_url,
         user_simulator=user_sim,
@@ -138,6 +140,8 @@ def main() -> None:
     ap.add_argument("--defender", choices=sorted(POLICIES), default="evidence_gathering")
     ap.add_argument("--no-persistence", action="store_true")
     ap.add_argument("--no-green", action="store_true")
+    ap.add_argument("--no-noise", action="store_true")
+    ap.add_argument("--perfect-sensors", action="store_true")
     ap.add_argument("--magic-observations", action="store_true")
     ap.add_argument("--service-url")
     ap.add_argument("--scenario", type=Path)
